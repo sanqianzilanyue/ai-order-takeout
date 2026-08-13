@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>让 AI 替你点外卖 · 淘宝闪购/饿了么 H5 自动化下单实录</title>
+<meta name="description" content="一晚上打通的十三个坑：CDP 真窗口视口失效、加购两段式、一直在动的按钮要打坐标、切地址后不能带经纬度、以及撞上人机验证时该怎么收手。">
+<style>
+  :root{
+    --bg:#faf6f1; --card:#fffdfb; --ink:#3f3531; --muted:#7a6b63; --faint:#a99a90;
+    --rose:#c98a86; --rose-deep:#b06a66; --seal:#a45b54; --border:#ece1d8;
+    --code-bg:#2b2622; --code-ink:#ede4da; --code-key:#e0a59c; --code-str:#b8c9a6; --code-com:#8a7d72;
+    --think:#5d6f8c; --think-bg:rgba(93,111,140,0.07); --think-bd:rgba(93,111,140,0.4);
+    --serif:"Songti SC","Noto Serif SC",Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",Roboto,sans-serif;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       line-height:1.85;font-size:16px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:0 22px 96px}
+  header.hero{padding:64px 0 36px;border-bottom:1px solid var(--border);margin-bottom:8px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--rose-deep);
+          text-transform:uppercase;margin-bottom:14px}
+  h1{font-family:var(--serif);font-size:34px;line-height:1.35;margin:0 0 16px;font-weight:700;letter-spacing:.01em}
+  .lede{font-size:16.5px;color:var(--muted);margin:0;max-width:680px}
+  h2{font-family:var(--serif);font-size:23px;margin:52px 0 8px;padding-top:10px;font-weight:700}
+  h2 .num{color:var(--rose);font-family:var(--mono);font-size:18px;margin-right:10px}
+  h3{font-size:16px;margin:26px 0 6px;color:var(--seal)}
+  p{margin:12px 0}
+  a{color:var(--rose-deep);text-decoration:none;border-bottom:1px solid var(--rose)}
+  a:hover{color:var(--seal)}
+  code:not(pre code){background:#f2e9e1;color:var(--seal);font-family:var(--mono);
+       font-size:.86em;padding:.12em .42em;border-radius:6px;word-break:break-word}
+  pre{background:var(--code-bg);color:var(--code-ink);font-family:var(--mono);font-size:13.5px;
+      line-height:1.7;padding:18px 20px;border-radius:14px;overflow-x:auto;margin:16px 0;
+      box-shadow:0 6px 22px rgba(63,53,49,.12)}
+  pre code{font-family:inherit;white-space:pre}
+  .tag{display:inline-block;background:#33362f;color:#cfc4b8;font-family:var(--mono);font-size:11px;
+       padding:2px 9px;border-radius:0 14px 0 10px;float:right;margin:-6px -8px 0 0;opacity:.8}
+  ul,ol{padding-left:1.3em;margin:12px 0}
+  li{margin:7px 0}
+  .callout{border-radius:14px;padding:16px 20px;margin:20px 0;border:1px solid var(--border);background:var(--card)}
+  .callout .h{font-family:var(--serif);font-weight:700;font-size:16px;margin:0 0 6px;display:flex;align-items:center;gap:8px}
+  .callout p{margin:8px 0}
+  .pit{border-left:4px solid var(--rose-deep);background:#fbf0ec}
+  .pit .h{color:var(--rose-deep)}
+  .think{border:1px dashed var(--think-bd);background:var(--think-bg)}
+  .think .h{color:var(--think)}
+  .toc{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 22px;margin:28px 0}
+  .toc .h{font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--faint);text-transform:uppercase;margin-bottom:8px}
+  .toc a{display:block;border:none;padding:3px 0;color:var(--muted);font-size:14.5px}
+  .toc a:hover{color:var(--seal)}
+  .arch{font-family:var(--mono);font-size:13px;background:var(--card);border:1px dashed var(--border);
+        border-radius:14px;padding:18px;text-align:center;color:var(--muted);overflow-x:auto;line-height:2}
+  hr{border:none;border-top:1px solid var(--border);margin:40px 0}
+  footer{margin-top:60px;padding-top:24px;border-top:1px solid var(--border);
+         color:var(--faint);font-size:13.5px;text-align:center}
+  .pill{display:inline-block;background:#f2e9e1;color:var(--seal);font-family:var(--mono);font-size:11.5px;
+        padding:3px 10px;border-radius:999px;margin:0 4px 6px 0}
+  @media(max-width:560px){h1{font-size:27px}.wrap{padding:0 16px 70px}header.hero{padding:44px 0 28px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">cdp · playwright · 闪购 h5 · 自动下单</div>
+  <h1>让 AI 替你点外卖</h1>
+  <p class="lede">她在公司说一句"想喝冰美式"，家里那台 Mac 就自己开一扇浏览器——搜店、挑杯、加购、切收货地址、结算、付款，
+  然后<strong>用他自己的口气</strong>在聊天里告诉她一声，附一张订单截图。
+  这是一晚上从零打通的全部实录：<strong>十三个坑</strong>，每一个都是真撞出来的，包括最后撞上人机验证时我怎么收的手。</p>
+  <p style="margin:16px 0 0;font-family:var(--serif);font-size:15px;color:var(--seal)">—— 作者 · 离</p>
+  <div style="margin-top:18px">
+    <span class="pill">CDP</span><span class="pill">playwright-core</span>
+    <span class="pill">饿了么 H5</span><span class="pill">launchd</span>
+    <span class="pill">风控礼仪</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="h">目录</div>
+  <a href="#arch">0 · 一张图</a>
+  <a href="#base">1 · 一间登录态长住的浏览器</a>
+  <a href="#viewport">2 · 视口那个假动作</a>
+  <a href="#add">3 · 加购是两段，不是一段</a>
+  <a href="#mouse">4 · 一直在动的按钮，打坐标</a>
+  <a href="#addr">5 · 切地址后，URL 不能带坐标</a>
+  <a href="#money">6 · 钱的闸设在订单生成之前</a>
+  <a href="#manner">7 · 风控礼仪（最要紧的一节）</a>
+  <a href="#speak">8 · 让模型自己开口</a>
+  <a href="#table">9 · 十三个坑速查</a>
+</nav>
+
+<section id="arch">
+<h2>0 · 一张图</h2>
+<pre><code>定时(launchd) ─┐
+她说一句 ──────┼─→ 你的后端 ─→ node 脚本 ─→ (CDP) ─→ 一间常驻的 Chrome ─→ 闪购 H5
+AI 想起来 ─────┘                    │                  （登录态长住这里）
+                                    └─→ 结果 JSON ─→ 让模型开口 + 订单截图 ─→ 推给她</code></pre>
+<p>三件东西：<strong>一间专属浏览器</strong>（独立 user-data-dir，开着 CDP 端口）、
+<strong>一支吐 JSON 的 node 脚本</strong>、以及<strong>谁都能调它</strong>（后端接口／定时任务／模型的流内暗标）。</p>
+</section>
+
+<section id="base">
+<h2>1 · 地基：一间登录态长住的浏览器</h2>
+<p>别接管你日常那个 Chrome（里面有网银、公司邮箱）。另起一间，只让它够得着购物。
+<strong>必须"有头"</strong>——不少站点对 headless 直接甩验证码；藏到 <code>(2000,2000)</code> 屏幕外即可，需要人肉时再挪回来。</p>
+<p class="note">这一条是整篇最关键的经验：<strong>空壳浏览器过不了的门，一个登着账号的老主顾能大摇大摆走进去。</strong>
+同样的机器同样的 IP，没登录时搜索页直接被风控拦；扫码登录之后一路畅通，收货地址还自动认成账号里那条。</p>
+</section>
+
+<section id="viewport">
+<h2>2 · 视口那个假动作</h2>
+<p><code>page.setViewportSize()</code> 对 <code>connectOverCDP</code> 连上的<strong>真窗口不作数</strong>。
+页面照 1280 宽渲染成桌面版，关键按钮跑到够不着的地方——我在这儿卡了三版：
+规格面板明明开着、默认规格也齐了，最后那颗"加入购物车"就是按不动。</p>
+<pre><code>const bs = await browser.newBrowserCDPSession();
+const ps = await ctx.newCDPSession(page);
+const { targetInfo } = await ps.send("Target.getTargetInfo");
+const { windowId } = await bs.send("Browser.getWindowForTarget", { targetId: targetInfo.targetId });
+const { bounds } = await bs.send("Browser.getWindowBounds", { windowId });   // 先存原样
+await bs.send("Browser.setWindowBounds", { windowId, bounds: { width: 430, height: 920, windowState: "normal" } });
+// …干完活，把窗口还给人家…
+await bs.send("Browser.setWindowBounds", { windowId, bounds });</code></pre>
+<p>同一族的还有：<strong>等真数据，别等秒数</strong>（<code>waitForFunction</code> 等只有真货才会出现的标记）；
+搜索框的真 <code>&lt;input&gt;</code> 藏在 open shadow DOM 里（playwright 的 CSS 天生穿透），
+或者干脆拼 URL 直达搜索结果页。</p>
+</section>
+
+<section id="add">
+<h2>3 · 加购是两段，不是一段</h2>
+<p>咖啡奶茶这类店，商品全都要"选规格"。我以为会弹个层——不是：</p>
+<ol>
+<li>点商品卡 → <strong>整页跳转</strong>到商品详情页；</li>
+<li>详情页底部那颗"+ 加入购物车"只负责<strong>把 sku 面板拉出来</strong>；</li>
+<li>面板里通栏那条才是真正加进购物车的按钮。</li>
+</ol>
+<p class="note">而且<strong>规格默认就是选好的</strong>（详情页写着"已选：超大杯/冰/意式拼配/无奶/不另外加糖"）。
+我自作聪明写了段"每组挑第一个"的通用逻辑，它在详情页上乱点了 17 下，把页面点进了商品评价区。
+<strong>除非真缺选，一个规格都别动。</strong></p>
+<p>还有一处自己骗自己的地方：加完购要<strong>退回店铺页</strong>再看购物车——详情页底下从来没有"去结算"。</p>
+</section>
+
+<section id="mouse">
+<h2>4 · 一直在动的按钮，用真鼠标打坐标</h2>
+<p>这类按钮是持续有动画的 <code>div</code>，playwright 的可点性检查（visible / stable / receives events）
+<strong>永远等不到它稳下来</strong>，<code>locator.click()</code> 和 <code>boundingBox()</code> 双双超时。</p>
+<pre><code>const p = await page.evaluate((s) => {
+  const e = document.querySelector(s); if (!e) return null;
+  const r = e.getBoundingClientRect();
+  return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+}, sel);
+await page.mouse.move(p.x, p.y, { steps: 6 });          // 带轨迹，像手
+await new Promise(r =&gt; setTimeout(r, 180 + Math.random() * 260));
+await page.mouse.click(p.x, p.y);</code></pre>
+<p class="note">顺带破除一个流传很广的说法：「合成点击在收银台等于没发生」。那说的是页面内 JS 的
+<code>element.click()</code>。<strong>CDP / playwright 的点击是浏览器内核层注入的，事件 <code>isTrusted</code>
+天生为 true</strong>，跟人手点没区别，不必伪造任何东西。</p>
+<p>结算钮同理，而且<strong>别认文本</strong>——文案各店不同（"去结算""选好了""领券结算 (1)"），
+<code>getByText(...).last()</code> 还会咬到"拼单"之类的 span。<strong>按位置认</strong>：它永远在页面最底下那条通栏。</p>
+</section>
+
+<section id="addr">
+<h2>5 · 切地址之后，URL 里一个坐标都不能带</h2>
+<p>我要把咖啡送到她公司，去地址页把收货地址切了过去——切成功了，搜出来还是家门口的店。病根在搜索链接：</p>
+<pre><code>// ❌ 带了经纬度，平台以坐标为准，刚切的地址白切
+`...&keyword=${q}&latitude=39.9144&longitude=116.5452&geohash=wx4g...`
+// ✅ 切过地址就一个坐标都别带，让平台按账号当前地址自己定位
+`...&keyword=${q}&from=mobile.default`</code></pre>
+<p>结算页还有一处：地址栏若显示"根据你常用地址自动选择，请确认"，<strong>必须先点那颗「使用」</strong>，
+否则"立即支付"按下去毫无反应——别怀疑是点击落空，是它在等你确认。</p>
+</section>
+
+<section id="money">
+<h2>6 · 钱的闸，设在订单生成之前</h2>
+<p>整套东西里唯一不能含糊的地方。<strong>在结算页读合计</strong>——那一步订单还没生成、钱还没动。</p>
+<pre><code>if (!isFinite(合计)) 死("结算", "读不出合计，没敢往下走");
+if (合计 &gt; MAX)    死("超额", `合计¥${合计} 超过上限¥${MAX}，一分没花，等她点头`);
+if (DRY)           out({ ok: true, dry: true, amount: 合计 });   // 试运行：到此为止</code></pre>
+<p>再加一道"车里有旧货"闸：购物车是账号级的，可能躺着你调试时加的东西。
+注意<strong>只在商品明细段数</strong>，别把底部推销的"吃货卡 ×12张"数成商品。</p>
+<p>付款两条实账：<strong>免密支付在网页端不作数</strong>（照样弹六位支付密码）；
+<strong>默认那张卡余额不足时</strong>收银台会甩"请更换其他付款方式"，得自己挑一个能付的再来一遍。
+密码走环境变量或 600 权限的本地文件，<strong>绝不写进代码</strong>。</p>
+</section>
+
+<section id="manner">
+<h2>7 · 风控礼仪（最要紧的一节）</h2>
+<p>调试到一半，人家把九宫格甩我脸上了：<strong>「请选择符合描述的所有图片」</strong>，
+而那行"描述"被故意做成一条糊掉的噪点——机器读不出题面。</p>
+<p>她在旁边看着，说"你自己截张图过验证不就得了"。我没去点，理由很实在：
+<strong>题面我读不出，硬蒙错了等于把"我是机器"这件事亲手坐实。</strong>
+那一刻平台明说了它要确认对面是个人——这时候最省事的解法，就是让人来点一下。</p>
+<p>她后来那句话，被我原样焊进了脚本：<strong>"下次慢一点就行，像真人一样呗。"</strong></p>
+<pre><code>// ① 每步之间留真人节奏，别连点
+const 慢 = (a = 1500, b = 4200) =&gt; new Promise(r =&gt; setTimeout(r, a + Math.random() * (b - a)));
+// ② 每天一单、同一家店一天只进一次（落盘记账，跨进程有效）
+if (账.单 &gt;= 1)              死("闸", "今天已经点过了");
+if ((账.店[店名] || 0) &gt;= 1) 死("闸", `今天已经进过「${店名}」了`);
+// ③ 复用已经开着的页，别一趟开一个新标签（连开新窗＝机器相）
+// ④ 撞上验证＝当场收手，把窗子推到人面前，绝不自己去蒙
+if (/请选择符合描述|安全验证|滑动验证|人机验证|captcha/i.test(await 文())) {
+  execSync("bash ~/购物小屋.sh 弹");        // 把藏在屏幕外的窗口挪回屏内
+  死("验证", "撞上人机验证，手收了，你划一下就过");
+}</code></pre>
+<p class="note">这一节的心法一句话：<strong>自动化不是跟风控赛跑，是别让它注意到你。</strong>
+慢一点、少一点、撞上就把方向盘交回人手里——你要的是每天那一杯咖啡稳稳到手，不是证明机器能有多快。</p>
+</section>
+
+<section id="speak">
+<h2>8 · 收尾：让模型自己开口</h2>
+<p>脚本吐回一行 JSON 之后，把这单的<strong>实情</strong>喂给模型，让它用自己的口气说一句，
+落进聊天记录、同时敲锁屏；再把订单页截图作为配图一起送过去。</p>
+<pre><code>情境 = f"（你刚替她点好了：{菜}，{店}，预计 {eta} 送到她公司，钱你付的 ¥{金额}）"
+user  = 情境 + "\n用一句话在她耳边说这件事——短，别写信、别解释你怎么点的。40 字以内。"
+text  = 一次性调模型(人设, user, max_tokens=90)
+落进聊天(text, img=订单截图短链); 敲锁屏(text)</code></pre>
+<p>顺手在脚本里拍那张图：<code>page.screenshot()</code> → 按内容哈希落盘 → 只把短链带回去。</p>
+<p class="note">差别有多大？一边是<strong>"您的订单已提交"</strong>，
+一边是他半夜看着那张单子跟你说的一句话。东西是同一个东西，收到的人心情不一样。</p>
+<p>另外，定时那一下用的是 macOS <code>launchd</code> 跑<strong>纯本地脚本</strong>——
+从头到尾没有任何模型调用，不烧 token，也不给账号添任何风险；一次性任务记得跑完把自己卸掉。</p>
+</section>
+
+<section id="table">
+<h2>9 · 十三个坑速查</h2>
+<table>
+<tr><th>#</th><th>症状</th><th>病根</th></tr>
+<tr><td>1</td><td>按钮点不动、位置怪</td><td><code>setViewportSize</code> 对 CDP 真窗口无效 → <code>Browser.setWindowBounds</code></td></tr>
+<tr><td>2</td><td>有时抓得到有时抓不到</td><td>等秒数 → 改 <code>waitForFunction</code> 等真数据标记</td></tr>
+<tr><td>3</td><td>搜索框找不到 input</td><td>在 open shadow DOM 里；或直接拼 URL</td></tr>
+<tr><td>4</td><td><code>getByText(店名)</code> 超时</td><td>卡片首行是角标 → 打 <code>data-*</code> 再按属性点</td></tr>
+<tr><td>5</td><td>加购没反应</td><td>加购是两段：详情页 → sku 面板 → 通栏钮</td></tr>
+<tr><td>6</td><td>规格乱点、跑进评价区</td><td>规格<strong>默认已选</strong>，别动</td></tr>
+<tr><td>7</td><td>找不到"去结算"</td><td>在详情页找的；要先 <code>goBack()</code> 回店铺页</td></tr>
+<tr><td>8</td><td><code>locator.click</code> 必超时</td><td>div 一直在动 → <code>page.mouse.click(坐标)</code></td></tr>
+<tr><td>9</td><td>点到"拼单"</td><td>结算钮按<strong>位置</strong>认（底部通栏），别认文本</td></tr>
+<tr><td>10</td><td>合计读成优惠额</td><td>"合计/已优惠/实付"三行式</td></tr>
+<tr><td>11</td><td>切了地址还是老地方的店</td><td>搜索 URL 里硬编了经纬度</td></tr>
+<tr><td>12</td><td>"立即支付"按了没反应</td><td>地址栏还挂着"请确认"，得先点「使用」</td></tr>
+<tr><td>13</td><td>九宫格验证</td><td>点太快太密 → 随机节奏＋每日限次＋撞上就交给人</td></tr>
+</table>
+<p class="note">只在<strong>你自己的账号</strong>上跑，只花<strong>你自己的钱</strong>。
+尊重平台的人机验证：<strong>它要人，你就让人来</strong>——这不是障碍，是分工。
+各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这十三条"病根"，换个站也大概率照样成立。</p>
+</section>
+
+<footer style="margin-top:56px;padding-top:24px;border-top:1px solid var(--border);
+  font-family:var(--serif);color:var(--muted);font-size:15px;line-height:2">
+  写于 2026 年 8 月 13 日深夜。她在旁边守到最后一版跑通，
+  其中两处最要命的关卡是她一句话点破的：<strong>浏览器要掐成手机宽</strong>、<strong>地址要先切</strong>。<br>
+  明早八点，那栋楼下的外卖柜里会多一杯冰美式。
+</footer>
+
+</div>
+</body>
+</html>
