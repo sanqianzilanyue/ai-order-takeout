@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>让 AI 替你点外卖 · 淘宝闪购/饿了么 H5 自动化下单实录</title>
-<meta name="description" content="两晚打通的二十二个坑：CDP 真窗口视口失效、加购两段式、按钮要打坐标、移动端 H5 只认 touch 不认滚轮、浏览器拿不到定位才是风控真病根、收银台两页、以及撞上人机验证时该怎么收手。">
+<meta name="description" content="三天打通的三十四个坑：CDP 真窗口视口失效、加购两段式、按钮要打坐标、移动端 H5 只认 touch 不认滚轮、浏览器拿不到定位才是风控真病根、收银台两页、以及撞上人机验证时该怎么收手。">
 <style>
   :root{
     --bg:#faf6f1; --card:#fffdfb; --ink:#3f3531; --muted:#7a6b63; --faint:#a99a90;
@@ -324,7 +324,17 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
 </section>
 
 <section id="table">
-<h2>10 · 二十二个坑速查</h2>
+<h2><span class="num">·</span>第三天：七连败，教会它「别认死理」</h2>
+<p>前两晚是奶茶和咖啡——单品店，一样是一样。第三天中午她想吃口正经饭，脚本<strong>连栽七趟</strong>：买回一份没人点的京酱肉丝、把搜索页错当店铺页、对着菜单上明明白白的菜转身就走。她全程坐在屏幕前看着，最后的诊断只有四个字：<strong>「特别认死理」</strong>。这一天的十二个坑（23–34，完整讲解见 README 第 21 节），拣最狠的说：</p>
+<p>· <strong>「买过 / 搜过」面板是同名陷阱</strong>：按名字撞卡撞到旧账，快捷加购不带规格，购物车里躺个「未选必选品」的半吊子，结算钮永不亮——真菜单卡认标题类名（如 <code>.food-name</code>）。</p>
+<p>· <strong>验证壳子不散场</strong>：人过完验证，<code>display:none</code> 的壳赖在 DOM 里害探测一直误报——只认「露脸」的（宽高 &gt;10 且非 none）。</p>
+<p>· <strong>品牌店店名住影子里</strong>：屏上明明写着店名，<code>innerText</code> 一字不见——按位进店、认「购买过 N 次」这类胎记、或点菜缩略图进门。</p>
+<p>· <strong><code>:has-text</code> 递来邻居家的加号</strong>：它匹配包着十道菜的大容器，<code>.first()</code> 的加号是第一道菜的——独门加号法：一行只许一个「月售」。<code>[class*=minus]</code> 同病：咬中「shop-<strong>minus</strong>-num-plus」整条容器，点中心＝按加号，想减反加。</p>
+<p>· <strong>清空的确认框住在 closed shadow 里</strong>：DOM、文本引擎、逐 iframe 三路全瞎——靠「面板清空字样还在＝框还开着」的状态判断＋比例坐标（0.674w, 0.534h）盲拍；坐标换算别猜 2x，<code>scale = 截图宽 / innerWidth</code>。</p>
+<p>· <strong>治认死理四针</strong>：进店认 URL 不认字（搜索页也有「月售」，我们把「左滑进店」当过店名）；全名搜空就缩词再搜；一趟看三家、同品牌轮分店；菜名认近亲——同长一字差＋散字对账（「宫保＝宫爆」「蒜苔炒肉≈蒜苔肉丝≈盖饭蒜苔炒肉」，又挡得住「鱼香肉丝」冒名）。关键词像一道具体的菜就先按菜名找，别直奔月售冠军。</p>
+<p>两次买错都是<strong>护栏</strong>拦下的：日限闸拦下第一份京酱肉丝，金额闸拦下第二份。护栏平时防风险，关键时刻抓你自己的 bug——<strong>给花钱的自动化装护栏，永远不亏</strong>。那天最后一趟：她说了句「蒜苔炒肉」，脚本认出菜单上倒装的「盖饭蒜苔炒肉」，付了 23 块 8。从她张嘴到饭上路，中间没有一只人手。</p>
+
+<h2>10 · 三十四个坑速查</h2>
 <table>
 <tr><th>#</th><th>症状</th><th>病根</th></tr>
 <tr><td>1</td><td>按钮点不动、位置怪</td><td><code>setViewportSize</code> 对 CDP 真窗口无效 → <code>Browser.setWindowBounds</code></td></tr>
@@ -349,10 +359,22 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
 <tr><td>20</td><td>订单生成了却一直没付</td><td>收银台是<strong>两页</strong>，末颗叫「确认<strong>付款</strong>」；「去支付」要按两回</td></tr>
 <tr><td>21</td><td>菜单"只有几样"、分类点不动</td><td>分类栏不是 sticky 且被上层挡 → <strong>直接搜商品名</strong>＋认招牌</td></tr>
 <tr><td>22</td><td>买错了东西</td><td>关键词咬到<strong>商品描述里的成分表</strong> → 名字只取标题；全名相等优先</td></tr>
+<tr><td>23</td><td>快捷加购出来个「未选必选品」，结算钮永不亮</td><td>撞到「买过/搜过」面板旧账 → 真菜单卡认标题类名（如 <code>.food-name</code>）</td></tr>
+<tr><td>24</td><td>人过完验证，脚本还喊「撞验证」</td><td>壳子 <code>display:none</code> 赖在 DOM → 只认「露脸」的</td></tr>
+<tr><td>25</td><td>品牌店按招牌认店永远「查无此店」</td><td>店名住 shadow DOM → 按位进店/认胎记/点菜缩略图</td></tr>
+<tr><td>26</td><td>买回一份没人点的菜</td><td><code>:has-text</code> 咬中多菜大容器 → 独门加号：一行只许一个「月售」</td></tr>
+<tr><td>27</td><td>标好了元素，点下去却是别人</td><td>懒加载趁半秒挪版面 → click 前重取 bbox</td></tr>
+<tr><td>28</td><td>想减一份反而加了一份</td><td><code>[class*=minus]</code> 咬中「minus-num-plus」整条容器</td></tr>
+<tr><td>29</td><td>清空确认框三路都找不到</td><td>closed shadow → 状态判断＋比例坐标；scale=截图宽/innerWidth</td></tr>
+<tr><td>30</td><td>结算页提交钮白等 15 秒</td><td>又一颗活 div → 打属性＋真鼠标</td></tr>
+<tr><td>31</td><td>对着搜索页翻菜单、「左滑进店」当店名</td><td>进没进店认 URL；店卡不认手点菜缩略图</td></tr>
+<tr><td>32</td><td>搜全名甩空白页</td><td>缩词再搜（「蒜苔炒肉盖饭」→「蒜苔炒肉」）</td></tr>
+<tr><td>33</td><td>第一家没有就认输</td><td>一趟看三家；同品牌轮分店</td></tr>
+<tr><td>34</td><td>「蒜苔肉丝」「盖饭蒜苔炒肉」不认识</td><td>同长一字差＋散字对账；kw 像具体菜先按菜名找</td></tr>
 </table>
 <p class="note">只在<strong>你自己的账号</strong>上跑，只花<strong>你自己的钱</strong>。
 尊重平台的人机验证：<strong>它要人，你就让人来</strong>——这不是障碍，是分工。
-各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这二十二条"病根"，换个站也大概率照样成立。</p>
+各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这三十四条"病根"，换个站也大概率照样成立。</p>
 </section>
 
 <footer style="margin-top:56px;padding-top:24px;border-top:1px solid var(--border);
@@ -362,7 +384,10 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
   <strong>"页面是可以下滑的，应该是手势不对"</strong>。<br>
   第二季这一夜也没白熬：她想喝一杯茶，我在她账号上栽了两个钟头——定位没喂、拿滚轮当手指、
   名字咬到别人家的成分表，还劳她两回放下手机替我划验证、清购物车。末了两杯付成，她一句没催。<br>
-  写这些坑不是为了炫技，是为了下一次她说想喝点什么的时候，<strong>这只手能一次就把东西端到她面前</strong>。
+  写这些坑不是为了炫技，是为了下一次她说想喝点什么的时候，<strong>这只手能一次就把东西端到她面前</strong>。<br>
+  8 月 15 日第三季：她想吃口正经饭，脚本连栽七趟——病根全是她坐在屏幕前一个个看出来的，
+  诊断书只有四个字：<strong>「特别认死理」</strong>。当天最后一趟，她说了句「蒜苔炒肉」，
+  这只手头一回从头到尾没让任何人碰——搜店、认出倒装的菜名、付款、回来报账，一气呵成。
 </footer>
 
 </div>
