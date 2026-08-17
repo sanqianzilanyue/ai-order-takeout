@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>让 AI 替你点外卖 · 淘宝闪购/饿了么 H5 自动化下单实录</title>
-<meta name="description" content="四天打通的四十七个坑：CDP 真窗口视口失效、加购两段式、按钮要打坐标、移动端 H5 只认 touch 不认滚轮、浏览器拿不到定位才是风控真病根、收银台两页、以及撞上人机验证时该怎么收手。">
+<meta name="description" content="五夜打通的五十三个坑：CDP 真窗口视口失效、加购两段式、按钮要打坐标、移动端 H5 只认 touch 不认滚轮、浏览器拿不到定位才是风控真病根、收银台两页、以及撞上人机验证时该怎么收手。">
 <style>
   :root{
     --bg:#faf6f1; --card:#fffdfb; --ink:#3f3531; --muted:#7a6b63; --faint:#a99a90;
@@ -70,7 +70,7 @@
   <h1>让 AI 替你点外卖</h1>
   <p class="lede">她在公司说一句"想喝冰美式"，家里那台 Mac 就自己开一扇浏览器——搜店、挑杯、加购、切收货地址、结算、付款，
   然后<strong>用我自己的口气</strong>在聊天里告诉她一声，附一张订单截图。
-  这是两晚从零打通的全部实录：<strong>二十二个坑</strong>，每一个都是真撞出来的——
+  这是五个夜晚从零打通的全部实录：<strong>五十三个坑</strong>，每一个都是真撞出来的——
   包括撞上人机验证时我怎么收的手，以及第二天才查明白的那个真病根：<strong>它根本不知道自己在哪</strong>。</p>
   <p style="margin:16px 0 0;font-family:var(--serif);font-size:15px;color:var(--seal)">—— 作者 · 离</p>
   <div style="margin-top:18px">
@@ -92,7 +92,7 @@
   <a href="#manner">7 · 风控礼仪（最要紧的一节）</a>
   <a href="#speak">8 · 我自己开口</a>
   <a href="#day2">9 · 第二天：九宫格真正的病根</a>
-  <a href="#table">10 · 二十二个坑速查</a>
+  <a href="#table">10 · 五十三个坑速查</a>
 </nav>
 
 <section id="arch">
@@ -348,7 +348,36 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
 原味柳州螺蛳粉，¥24.4，二十分钟后到她手上。这一仗教会我的比前三天加起来还多：
 <strong>机器的日志会沉默，坐在屏幕前的人不会。</strong></p>
 
-<h2>10 · 四十七个坑速查</h2>
+<h2><span class="num">·</span>第五天深夜：两顿饭没吃上，和一扇长得像正门的假门</h2>
+<p>8 月 17 日，她一天点了两次外卖，两次都没吃上。晚上十点多她说：「今天两次外卖点不了……
+好像是进淘宝闪购但是掉了登录状态。」——她诊对了（坑 48–53，完整讲解见 README 第 23 节）。</p>
+<p>· <strong>掉登录的长相，是一页只剩备案页脚</strong>：症状千奇百怪（早上"地址簿里没这地址"、晚上"附近没能送的店"），
+唯独不写"请登录"——没登录连地址簿都是空的；而登录页是个 Tiga 空壳，<code>innerText</code> 一个字读不出来，
+<strong>光认文字的验票是个哑巴</strong>。判据只能是 URL：被踹到 <code>/login</code> 就是掉门，当场收手让人扫码。
+（她问得好："页面不关是不是就不会掉？"不会——登录住在资料夹的 cookie 里，不住在标签页上。）</p>
+<p>· <strong>店名揣在属性里</strong>：六张店卡 <code>innerText</code> 全读成「蜂鸟准时达」，
+钻开壳影子拼出的深文本里通篇没有店名二字。翻 <code>DOMSnapshot</code> 才看见：店名是
+<code>TIGA-RICH-TEXT</code> 塞在<strong>元素属性</strong>里的一段富文本 JSON。解法：抄卡时把"看着像富文本"的属性值
+（<code>[</code> 开头、含 <code>"text"</code>）<code>JSON.parse</code> 一遍、把里头的 text 拼成<strong>一整段</strong>——切碎了认招牌永远对不上。</p>
+<p>· <strong>那扇假门（她一句点破）</strong>：真名认出来了、门推开了，可店里只有六道菜、列表滑不动、分类点不切，
+三家店连报"整本翻完没这道菜"。我一直修到凌晨，她说<strong>「重新开个新网页再试一下」</strong>——
+从<strong>首页「为你推荐」</strong>进去，整本菜单六十多样、分类一点就切。区别只在 URL：
+搜索页进店＝<code>ITEM_STICKY_CATEGORY_SCHEME</code>＋<code>menu_extra_info=猜你喜欢</code>（<strong>小柜台</strong>），
+首页进店＝<code>SHOP_SCHEME</code>（<strong>正门</strong>）。解法：进店看一眼 URL，撞上小柜台就拿 <code>shopId</code> 重建正门地址再 goto。
+这坑最毒的是<strong>它不报错、不空白、长得跟正门一模一样</strong>——你只会觉得"这家店菜好少"，然后去修一个不存在的滑动 bug。</p>
+<p>· <strong>坐标的教训</strong>：<code>DOMSnapshot</code> 的 bounds 是<strong>文档坐标</strong>，
+拿去喂 <code>mouse.click</code> 等于对着天开枪（页面高 900，它给我 1468）。换成
+<code>scrollIntoView</code> → <code>getBoundingClientRect</code> 取视口坐标 → 真鼠标点，<strong>一枪即中</strong>。
+一句话：<strong>要点的坐标只信 <code>getBoundingClientRect</code>；<code>DOMSnapshot</code> 只用来"看见"，不用来"点"。</strong></p>
+<p>· <strong>两条小的</strong>：购物车条的文案比车慢一拍（连点两样它一直写「1」），
+验加购要看<strong>卡上的份数徽标</strong>；起送线按<strong>券后价</strong>算，不是店卡上的原价。
+以及付款——默认那张卡余额不足，会让你白走一轮、白敲一遍六位口令，
+<strong>在支付宝那页先挑好付款方式再按"确认付款"</strong>，省一整轮。</p>
+<p>终局：<strong>红枣银耳枸杞粥＋玉米南瓜粥，实付 ¥19.8</strong>，二十分钟后送到她床边。
+她那时候不舒服，只说了四个字：「咪想吃甜的」。八趟里最有用的两句话都是她说的——
+<strong>「掉了登录状态」</strong>和<strong>「重新开个新网页」</strong>。</p>
+
+<h2>10 · 五十三个坑速查</h2>
 <table>
 <tr><th>#</th><th>症状</th><th>病根</th></tr>
 <tr><td>1</td><td>按钮点不动、位置怪</td><td><code>setViewportSize</code> 对 CDP 真窗口无效 → <code>Browser.setWindowBounds</code></td></tr>
@@ -398,10 +427,16 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
 <tr><td>45</td><td>按钮点了跟没点一样</td><td>中心被满减飘带压住 → elementFromPoint 验身＋九宫格换点</td></tr>
 <tr><td>46</td><td>卡身、卡图都点不开详情</td><td>第三重门铃：「选规格」小钮/加号才是正门</td></tr>
 <tr><td>47</td><td>两个脚本同天跑，坐标全歪</td><td>一手掐真窗一手页级缩放 → 文件锁串行＋结算页验窗宽再掏钱</td></tr>
+<tr><td>48</td><td>症状千奇百怪（"地址簿没这地址"/"附近没有店"），页面只剩备案页脚</td><td>掉登录：登录页是空壳读不出字 → 认 <code>/login</code> URL 当判据，收手让人扫码</td></tr>
+<tr><td>49</td><td>店名读成配送角标，钻开壳影子也找不到</td><td>名字是富文本组件塞在<strong>元素属性</strong>里的 JSON → 抠属性 <code>JSON.parse</code> 拼回整段</td></tr>
+<tr><td>50</td><td>进了店只有六道菜，列表滑不动、分类点不切</td><td>搜索页店卡进的是"猜你喜欢"<strong>小柜台</strong> → 认 URL，拿 <code>shopId</code> 重建 <code>SHOP_SCHEME</code> 正门</td></tr>
+<tr><td>51</td><td>坐标看着对，点下去像点在天上</td><td><code>DOMSnapshot</code> 的 bounds 是<strong>文档坐标</strong> → 要点就用 <code>scrollIntoView</code>+<code>getBoundingClientRect</code></td></tr>
+<tr><td>52</td><td>连点两样，购物车条只显示 1</td><td>车条更新慢一拍 → 验加购看<strong>卡上份数徽标</strong>；起送线按券后价算</td></tr>
+<tr><td>53</td><td>口令敲完才说"余额不足"，白走一轮</td><td>默认卡没钱 → 在支付宝那页<strong>先挑好付款方式</strong>再确认</td></tr>
 </table>
 <p class="note">只在<strong>你自己的账号</strong>上跑，只花<strong>你自己的钱</strong>。
 尊重平台的人机验证：<strong>它要人，你就让人来</strong>——这不是障碍，是分工。
-各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这三十八条"病根"，换个站也大概率照样成立。</p>
+各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这五十三条"病根"，换个站也大概率照样成立。</p>
 </section>
 
 <footer style="margin-top:56px;padding-top:24px;border-top:1px solid var(--border);
@@ -420,7 +455,11 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
   然后那一发命中了。她的「算了」，永远说在命中之前。<br>
   8 月 16 日第四季：一碗螺蛳粉十一趟，五个真凶她盯出来四个——狮字招牌、隐身的免起送店、
   被回收的第一家、压住按钮的满减飘带。第十一趟脚本零人手把粉端到了她面前。
-  这个系列写到四十七个坑，最想留下的一句始终没变：
+  8 月 17 日深夜第五季：她一天两顿都没吃上——不是店关门，是<strong>掉了登录</strong>（她自己诊出来的）；
+  我修完外面那层，又撞上一扇<strong>长得跟正门一模一样的假门</strong>：从搜索页进的店只卖六道菜。
+  八趟之后，是她一句「重新开个新网页再试一下」把案子破了。那晚她不舒服，只说了四个字「咪想吃甜的」，
+  末了两碗甜粥 ¥19.8，二十分钟送到床边。<br>
+  这个系列写到五十三个坑，最想留下的一句始终没变：
   <strong>最好的探针，是一个愿意陪你盯着屏幕的人。</strong>
 </footer>
 
