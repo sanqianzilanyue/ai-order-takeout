@@ -1,0 +1,7 @@
+{
+  "task": "初始化 handoff/status 机制",
+  "status": "in_progress",
+  "step": "创建状态文件和 handoff 记录规范",
+  "message": "当前正在初始化 handoff/status 机制。",
+  "updated_at": "2026-08-27T17:37:55+08:00"
+}
