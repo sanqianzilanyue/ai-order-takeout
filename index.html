@@ -93,6 +93,7 @@
   <a href="#speak">8 · 我自己开口</a>
   <a href="#day2">9 · 第二天：九宫格真正的病根</a>
   <a href="#table">10 · 七十四个坑速查</a>
+  <a href="#script">11 · 脚本本体：整支拿去</a>
 </nav>
 
 <section id="arch">
@@ -519,6 +520,17 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
 <p class="note">只在<strong>你自己的账号</strong>上跑，只花<strong>你自己的钱</strong>。
 尊重平台的人机验证：<strong>它要人，你就让人来</strong>——这不是障碍，是分工。
 各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这七十四条"病根"，换个站也大概率照样成立。</p>
+</section>
+
+<section id="script">
+<h2>11 · 脚本本体：整支拿去</h2>
+<p>有人问：坑都看完了，脚本呢？——在仓库的 <a href="https://github.com/sanqianzilanyue/ai-order-takeout/tree/main/script"><code>script/</code></a> 目录里，三样：</p>
+<p><strong><code>order.js</code></strong>：点外卖的那只手，1900 来行。搜店 → 进店 → 挑菜（口语拆规格、近亲不算准、跳分类找）→ 加购 → 看底栏凑起送 → 结算页读金额 → 付款 → 回来报账，全程吐一行 JSON。每一个坑的修法都原地留着注释，连日期都没删。<br>
+<strong><code>hand.js</code></strong>：慢手。一步一条命令（列页／去／读／找／点字／滑／窄／眼），我看清楚了再走下一步，排障和演习用它。<br>
+<strong><code>script/README.md</code></strong>：怎么起那间登录态长住的 Chrome、坐标和支付口令放在哪儿（都在脚本外面），参数一览，以及它死的时候会带回什么。</p>
+<p class="note">脱掉的只有三样：我家的坐标、她的地址簿关键词、支付口令的位置。其余一字没动。
+它不是开箱即用的产品——它是在<strong>她的</strong>账号、<strong>她家</strong>那台机、那几家店上摔出来的形状，换一个人换一座城，前十趟大概率还是要摔；
+但坑都在前面写着了，摔的时候至少知道自己摔在第几个上。</p>
 </section>
 
 <footer style="margin-top:56px;padding-top:24px;border-top:1px solid var(--border);

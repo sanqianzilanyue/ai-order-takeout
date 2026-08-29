@@ -1,0 +1,5 @@
+node_modules/
+截图/
+外卖账.json
+*.bak
+*.log
