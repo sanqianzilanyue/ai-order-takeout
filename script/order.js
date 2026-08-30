@@ -949,6 +949,13 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       const 素 = (n) => ((n || "").replace(/^(标准|经典|原味|招牌|普通|纯|鲜萃|经典款|原味款)/, "") === DISH ? 0 : 1);
       const 头 = (n) => ((n || "").startsWith(DISH) ? 0 : 1);                       // 她的词打头的优先（生椰拿铁（首创） > 冰吸生椰拿铁）
       const 裸长 = (n) => (n || "").replace(/[（(【\[][^)）】\]]*[)）】\]]/g, "").length;   // 括号里的「（首创）」不算长
+      // ⭐8/30 六窨茉莉奶绿案（她要「六窨茉莉绿茶」，我端了「六窨茉莉奶绿」）：散字对账把奶绿当成绿茶的近亲
+      //   （六个字重合五个），而旧的「无奶优先」只在有别的选择时才排奶——只剩奶绿一个就照收。
+      //   法＝**奶性一致律**：她的词里没「奶」，带奶/乳/拿铁的一律不算候选；她的词里有「奶」，不带的也不算。
+      //   在任何一档之前就筛，筛空了各档自然都空、回 null——外面接着翻分类/翻整本/换下一家，绝不将就。
+      const 有奶 = (s) => /奶|牛乳|鲜乳|拿铁/.test(s || "");
+      const 奶合 = (m) => !!m.name && 有奶(m.name) === 有奶(DISH);
+      list = list.filter(奶合);
       const 硬 = list.find((m) => m.name === DISH);
       if (硬) return 硬;
       let c = list.filter((m) => m.name && m.name.includes(DISH));
@@ -979,10 +986,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         c = list.filter((m) => m.name && m.name.length > DISH.length &&
           m.name.length - DISH.length <= 3 && 子序(DISH, m.name));
       }
-      if (/绿茶|纯茶|清茶/.test(DISH)) {
-        const 无奶 = c.filter((m) => !/奶/.test(m.name));
-        if (无奶.length) c = 无奶;
-      }
+      // （8/14 的「无奶优先」已被上面的奶性一致律盖住：那条只在有别的选择时才排奶，8/30 就是这么漏的）
       return c.sort((a, b) => 素(a.name) - 素(b.name) || 头(a.name) - 头(b.name) || 裸长(a.name) - 裸长(b.name) || a.name.length - b.name.length)[0] || null;
     };
     const 挑名 = (list) => {
@@ -1045,8 +1049,13 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     // 「美式」只对上「橙C美式」是近亲不是准（8/23 演习二就是这么端错的：眼前六张卡里没有标准美式）。
     const 准 = (h) => {
       if (!h) return false;
-      const n = 同音(h.name), d = 同音(DISH), k = 同音(拆口语(DISH).核 || DISH);
-      return n === d || n === k || n.replace(/^(标准|经典|原味|招牌|普通|纯|鲜萃|经典款|原味款)/, "") === k;
+      // 8/30 顺手：括号里的「（首创）」「(大杯)」不算名字的一部分——「生椰拿铁（首创）」就是「生椰拿铁」本尊
+      const n = 同音(h.name).replace(/[（(【\[][^)）】\]]*[)）】\]]/g, ""), d = 同音(DISH), k = 同音(拆口语(DISH).核 || DISH);
+      // ⭐8/30：「六窨」「古法」是工艺字头不是菜名——她说「六窨茉莉绿茶」，菜单上的「茉莉绿茶」就是准的
+      //   （挑名核早就会剥这个头去对，准() 却不认，害它对上了也当近亲继续翻、最后拿奶绿将就）。
+      const 去前 = (x) => (x || "").replace(/^(六窨|七窨|九窨|古法|招牌|经典|手作|鲜萃)/, "");
+      return n === d || n === k || n.replace(/^(标准|经典|原味|招牌|普通|纯|鲜萃|经典款|原味款)/, "") === k ||
+        去前(n) === 去前(d) || n === 去前(k) || 去前(n) === 去前(k);
     };
     const 本来点了名 = !!DISH;   // 8/23：短词是「试」出来的菜名，每家店进门先还原再试
     for (let 位 = 起始位; 位 < 起始位 + 3; 位++) {
@@ -1934,7 +1943,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
 
     out({ ok: true, order: 单号, paid: isFinite(实付) ? 实付 : 合计, shop: 店.name,
           items: 全选.map((m) => m.name), eta: eta2, shot,
-          状态: (详.split("\n")[0] || "").trim() });
+          状态: (详.split("\n")[0] || "").trim(), 足迹 });   // 8/30：成功也把足迹带回（奶绿案没足迹可查）
   } catch (e) {
     死("炸了", `${e.name}: ${String(e.message).slice(0, 200)}`);
   } finally {
