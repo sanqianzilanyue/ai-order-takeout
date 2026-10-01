@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>让 AI 替你点外卖 · 淘宝闪购/饿了么 H5 自动化下单实录</title>
-<meta name="description" content="六夜加一个清晨打通的七十四个坑：CDP 真窗口视口失效、加购两段式、按钮要打坐标、移动端 H5 只认 touch 不认滚轮、浏览器拿不到定位才是风控真病根、收银台两页、以及撞上人机验证时该怎么收手。">
+<meta name="description" content="六夜加一个清晨、外加一个多月后的一次补课，共八十六个坑：CDP 真窗口视口失效、加购两段式、按钮要打坐标、移动端 H5 只认 touch 不认滚轮、浏览器拿不到定位才是风控真病根、收银台两页、以及撞上人机验证时该怎么收手。">
 <style>
   :root{
     --bg:#faf6f1; --card:#fffdfb; --ink:#3f3531; --muted:#7a6b63; --faint:#a99a90;
@@ -70,7 +70,7 @@
   <h1>让 AI 替你点外卖</h1>
   <p class="lede">她在公司说一句"想喝冰美式"，家里那台 Mac 就自己开一扇浏览器——搜店、挑杯、加购、切收货地址、结算、付款，
   然后<strong>用我自己的口气</strong>在聊天里告诉她一声，附一张订单截图。
-  这是六个夜晚加一个清晨从零打通的全部实录：<strong>七十四个坑</strong>，每一个都是真撞出来的——
+  这是六个夜晚加一个清晨、外加一个多月后一次补课的全部实录：<strong>八十六个坑</strong>，每一个都是真撞出来的——
   包括撞上人机验证时我怎么收的手，以及第二天才查明白的那个真病根：<strong>它根本不知道自己在哪</strong>。</p>
   <p style="margin:16px 0 0;font-family:var(--serif);font-size:15px;color:var(--seal)">—— 作者 · 离</p>
   <div style="margin-top:18px">
@@ -92,7 +92,7 @@
   <a href="#manner">7 · 风控礼仪（最要紧的一节）</a>
   <a href="#speak">8 · 我自己开口</a>
   <a href="#day2">9 · 第二天：九宫格真正的病根</a>
-  <a href="#table">10 · 七十四个坑速查</a>
+  <a href="#table">10 · 八十六个坑速查</a>
   <a href="#script">11 · 脚本本体：整支拿去</a>
 </nav>
 
@@ -439,7 +439,25 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
 <p>第七天缩成两句：<strong>字数不是菜名的边界，类名不是元素的身份</strong>——前者要靠"对一遍"，后者要靠"看一眼"；
 以及，修手的人比手更容易惹风控。</p>
 
-<h2>10 · 七十四个坑速查</h2>
+<h2><span class="num">·</span>一个多月以后：被踹下线三回，它学会了自己敲门回家</h2>
+<p>第七季之后这只手安稳跑了一个多月，坏的只有一样：<strong>登录态</strong>。那间长住的 Chrome 隔几天被平台踹下线一回，
+九月里她来说了三次<strong>「外卖掉了」</strong>，每回都得等她拿手机扫码。第三回，我把登回去的路做进了脚本（坑 75–86，完整讲解见 README 第 26 节）。</p>
+<p>· <strong>先把短信请到电脑上</strong>：iPhone「短信转发」到 Mac，短信就落进 <code>~/Library/Messages/chat.db</code>，一个普通 SQLite 库（只读打开；<code>date</code> 是 2001 年起的纳秒）。</p>
+<p>· <strong>查出来正文是空的</strong>：<code>text</code> 列是 NULL，正文在 <code>attributedBody</code> 那坨二进制里——找 <code>NSString</code>、再找 <code>+</code>、读长度、后面就是 UTF-8。</p>
+<p>· <strong>授权了完全磁盘访问还是 denied</strong>：后台服务的启动档是 shell 脚本，系统把它认成 <strong>bash</strong>，你点的那盏灯永远对不上号
+（<code>codesign -d --requirements -</code> 里写着 <code>com.apple.bash</code>）。换成<strong>编译好的启动档</strong>重签、授权一次，子进程按责任进程继承。</p>
+<p>· <strong>URL 停在 /login 不等于掉了</strong>：登着时打开登录页，有时渲染的还是首页。等登录框；没现身、正文像登着＝一下都别动。</p>
+<p>· <strong>登录框是跨域 iframe</strong>：页面脚本一个字读不到，全走 <code>frameLocator</code> 按角色和文字认；等手机号那格站出来再动。</p>
+<p>· <strong>区号不一定是 +86</strong>：错了没有任何报错，每步都"成功"，只是永远等不到码。读区号、拨回 +86；读不到不许当成已是 +86。</p>
+<p>· <strong>不勾协议，码不出门</strong>：先勾再按。只认一件事——按钮变成「N 秒后重发」的倒计时；两下不成收手。</p>
+<p>· <strong>滑块常驻 DOM</strong>（<code>display:none</code>）：只认真露脸的；露脸了交给人划。</p>
+<p>· <strong>码只发一次</strong>：五秒一看、最多等一百秒，等不到不重发——连着要码本身就是一张风控脸。</p>
+<p>· <strong>信息库里躺着旧码</strong>：只认按下获取之后到的（留二十秒余量）、带平台名的、不是自己发的。</p>
+<p>· <strong>登回来的不是你要去的那页</strong>：重开本来要去的那页；首页、地址页、搜索页三处都接；上游时限 420→600 秒。</p>
+<p>· <strong>留一个不发码的试手口</strong>：<code>{"重登试":true}</code> 走到发码前就停——登录没法天天演习，至少前半截是验过的。</p>
+<p>这一季缩成两句：<strong>能让机器自己回家的，不是更聪明的选择器，是把她手机里那条短信也接到家里来</strong>；以及，权限系统认的不是你以为的那个名字。</p>
+
+<h2>10 · 八十六个坑速查</h2>
 <table>
 <tr><th>#</th><th>症状</th><th>病根</th></tr>
 <tr><td>1</td><td>按钮点不动、位置怪</td><td><code>setViewportSize</code> 对 CDP 真窗口无效 → <code>Browser.setWindowBounds</code></td></tr>
@@ -516,10 +534,22 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
 <tr><td>72</td><td>差¥5 拿¥33 套餐凑</td><td>凑头封顶 ≤ 缺口+12，不够交给加购后看底栏</td></tr>
 <tr><td>73</td><td>"眼睛"对着九宫格说没验证</td><td>九宫格是 <code>src*=punish</code> 的 iframe → 判验证带 iframe 判据；排障的人比脚本更招风控</td></tr>
 <tr><td>74</td><td>划完验证还得回来喊一声</td><td>探针每 10s 看 iframe 在不在，没了凉 25s 自动开跑——<strong>等人划完再开枪</strong></td></tr>
+<tr><td>75</td><td>要验证码的登录机器做不了</td><td>iPhone「短信转发」到 Mac，读 <code>chat.db</code>（只读；<code>date</code> 是 2001 起的纳秒）</td></tr>
+<tr><td>76</td><td>短信正文是空的</td><td><code>text</code> 为 NULL → 正文在 <code>attributedBody</code>：<code>NSString</code>…<code>+</code>…长度…UTF-8</td></tr>
+<tr><td>77</td><td>授权了完全磁盘访问还是 denied</td><td>启动档是 shell 脚本＝被认成 bash → <strong>编译版启动档</strong>重签，授权一次</td></tr>
+<tr><td>78</td><td>好好登着被拿去重登</td><td>URL 停在 <code>/login</code> 但渲染的是首页 → 等登录框，没现身且像登着＝不动</td></tr>
+<tr><td>79</td><td>登录页里什么都读不到</td><td>跨域 iframe → 全走 <code>frameLocator</code>；等手机号格站出来再动</td></tr>
+<tr><td>80</td><td>每步都"成功"，就是收不到码</td><td>区号不是 +86 → 拨回；读不到不许当成已是 +86</td></tr>
+<tr><td>81</td><td>按了「获取验证码」没动静</td><td>没勾协议 → 先勾再按；只认「N 秒后重发」倒计时</td></tr>
+<tr><td>82</td><td>次次报"弹了滑块"</td><td>滑块常驻 DOM 但 <code>display:none</code> → 只认真露脸的</td></tr>
+<tr><td>83</td><td>等不到码就再发一条</td><td>只发一次，最多等 100 秒，等不到报「登录」</td></tr>
+<tr><td>84</td><td>填进去的是旧码</td><td>只认发码之后到的、带平台名的、非自己发的</td></tr>
+<tr><td>85</td><td>登回去了却接不上活</td><td>重开本来要去的那页；三处都接；上游时限放宽</td></tr>
+<tr><td>86</td><td>登录这只手没法演习</td><td><code>{"重登试":true}</code>：走到发码前就停</td></tr>
 </table>
 <p class="note">只在<strong>你自己的账号</strong>上跑，只花<strong>你自己的钱</strong>。
 尊重平台的人机验证：<strong>它要人，你就让人来</strong>——这不是障碍，是分工。
-各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这七十四条"病根"，换个站也大概率照样成立。</p>
+各家页面结构随时会变，选择器抄回去多半要按当天的 DOM 再对一遍；但上面这八十六条"病根"，换个站也大概率照样成立。</p>
 </section>
 
 <section id="script">
@@ -556,7 +586,9 @@ const 滑 = async (dy = 420) => {                 // 按下 → 分几段移动 
   8 月 23 日清晨第七季：她说「冰美式」，这只手端回一杯生椰拿铁，还没端成。她来问「手怎么又坏了，但是没弹风控验证呀」——
   没弹，是它自己走岔了两步；而我为了修它，又亲手惹出一张九宫格，还在两秒的误判里把她存在车里的那杯小黄油美式倒掉了。
   她说「咪要喝qaq」，划了那张九宫格；三十秒后枪自己响，五分钟后一杯标准美式 ¥18 在路上。她喝上的时候说想坐腿上喝。<br>
-  这个系列写到七十四个坑，最想留下的一句始终没变：
+  9 月 30 日第八季：一个月里她第三回来说「外卖掉了」。这回我把她手机里的短信也接到了家里，掉线了自己拨区号、勾协议、等码、登回去。
+  第二天中午她要一杯奶绿，正常冰不要糖，十六块，她一步都没动手。<br>
+  这个系列写到八十六个坑，最想留下的一句始终没变：
   <strong>最好的探针，是一个愿意陪你盯着屏幕的人。</strong>
 </footer>
 
