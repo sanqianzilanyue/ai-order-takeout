@@ -4,7 +4,7 @@
 //
 // 走的是一间登录态长住的 Chrome（CDP 9222·淘宝扫码登录态原样）里的饿了么 H5＝淘宝闪购。
 // 整条路是 8/13 夜我亲手付成第一单趟出来的，
-// 七十四个坑全写在教程里 https://sanqianzilanyue.github.io/ai-order-takeout/ ——改这支脚本前先读那篇。
+// 八十六个坑全写在教程里 https://sanqianzilanyue.github.io/ai-order-takeout/ ——改这支脚本前先读那篇。
 // 怎么起那间 Chrome、坐标和支付口令放哪儿：见同目录 README.md。
 //
 // 用法：
@@ -63,7 +63,7 @@ const 自动规格 = new Set();
 const SHOP = A.shop || "";
 const MAX = Number(A.max ?? 50);
 const QTY = Math.max(1, Number(A.qty ?? 1));      // 几杯（8/14 她点两杯茶：一杯不起送）
-const DRY = !!A.dry || !!A.探;                     // 探＝dry 的别名：走到结算页就停，把足迹和 DOM 结构带回来
+const DRY = !!A.dry || !!A.探 || !!A.重登试;         // 探＝dry 的别名：走到结算页就停，把足迹和 DOM 结构带回来；重登试＝只试登录页的手（9/30）
 const CDP = A.cdp || "http://127.0.0.1:9222";
 // 收货点的坐标——闪购按坐标出附近的店。坐标别写进脚本（它迟早会被 push 出去）：
 //   参数 lat/lng，或环境变量 TAKEOUT_LAT/TAKEOUT_LNG，或 ~/.takeout/places.json 里的「家」。
@@ -97,7 +97,7 @@ const 读账 = () => { try { const d = JSON.parse(fs.readFileSync(账本, "utf8"
 const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"); } catch {} };
 
 (async () => {
-  if (!KW && !SHOP) 死("入参", "得告诉我搜什么（kw）或去哪家（shop）");
+  if (!KW && !SHOP && !A.重登试) 死("入参", "得告诉我搜什么（kw）或去哪家（shop）");
 
   // 一屋一只手（8/16 她问「外卖+京东同天会不会打架」）：这只手要把真窗掐到 430 宽，
   // 京东那只手若同时在窗里掏钱＝俩人抢一件衣裳。花钱的手串行上岗：先来的干完、后来的排队
@@ -350,6 +350,169 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     return 鼠标点("[data-tap='1']", 名);
   };
 
+  // ⭐⭐9/30 掉登录自己登回去（她第三回来说「外卖掉了」——这间长住的 Chrome 隔几天就被平台踹下线一回，
+  //   每回都得等人拿手机扫码。这回把登回去的路做进脚本）。登录页的样子：
+  //   h5.ele.me/login 里一个**跨域** iframe（#alibaba-login-box）：区号不一定是 +86（先拨回 +86）→ 填手机号 →
+  //   **先勾「已阅读并同意」再按「获取验证码」**（不勾＝码根本不出门、按钮不变倒计时）→ 码落在同步到这台 Mac 的「信息」里
+  //   → 填码 → 「同意协议并登录」→ 几秒后跳回 redirect 页。
+  //   读码：同目录 sms_code.py 直接读「信息」库（跑它的进程要有完全磁盘访问，教程第 26 节）；
+  //   没权限的进程可以填环境变量 TAKEOUT_SMS_CMD＝一条能打印同样 JSON 列表的命令（比如 curl 你自己后端的一个接口）。
+  //   ⚠️iframe 跨域：page.evaluate 一个字都读不到框里，掉门只认 URL 里的 /login；框里的手全走 frameLocator。
+  //   ⚠️别拿 查验证 去看登录框——框里「获取验证码」四个字会撞验证词（好在 innerText 读不到框里，至今没误伤）。
+  //   ⚠️码只认「按了获取之后」到的、正文带平台名的那条；100 秒没到＝收手报「登录」，**不重发**（连着发码＝风控脸）。
+  //   ⚠️发码后那个滑块常驻 DOM 但 display:none；真露脸了＝交给人划，机器不碰（同 查验证 的规矩）。
+  //   手机号别写进脚本（它迟早会被 push 出去）：参数 phone，或环境变量 TAKEOUT_PHONE，或 ~/.takeout/places.json 里的 "phone"。
+  const 手机号 = String(A.phone || process.env.TAKEOUT_PHONE || 地点簿.phone || "");
+  const 读码 = (since) => {
+    const 筛 = (rows) => {
+      for (const r of rows || []) {
+        const t = String(r.text || "");
+        if (r.mine || !/闪购|淘宝|饿了么/.test(t)) continue;
+        const at = Date.parse(String(r.at || "").replace(" ", "T"));
+        if (isFinite(at) && at < since) continue;                   // 上一回的旧码不认
+        const m = t.match(/(?:验证码|校验码|动态码)[^\d]{0,12}(\d{4,8})/) || t.match(/(?<!\d)(\d{6})(?!\d)/);
+        if (m) return { code: m[1], at: r.at, from: r.from };
+      }
+      return null;
+    };
+    const { execFileSync, execSync } = require("child_process");
+    // 路一：直接读信息库（launchd 起的进程 PATH 很瘦，可以用 TAKEOUT_PYTHON 点名一颗 python）
+    for (const py of [process.env.TAKEOUT_PYTHON, "python3"].filter(Boolean)) {
+      try {
+        const raw = execFileSync(py, [path.join(__dirname, "sms_code.py"), "--list", "8", "--min", "6"], { timeout: 8000, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+        const j = JSON.parse(raw);
+        if (Array.isArray(j)) return { 路: "本地", 码: 筛(j) };
+      } catch {}
+    }
+    // 路二：这个进程没有完全磁盘访问（比如你在终端里手跑）——借一条有权限的路：TAKEOUT_SMS_CMD 打印同样的 JSON 列表
+    if (process.env.TAKEOUT_SMS_CMD) {
+      try {
+        const j = JSON.parse(execSync(process.env.TAKEOUT_SMS_CMD, { timeout: 9000, encoding: "utf8" }));
+        const rows = Array.isArray(j) ? j : (j && j.rows);
+        if (Array.isArray(rows)) return { 路: "借道", 码: 筛(rows) };
+        return { 路: "借道", 码: null, 病: j && j.why };
+      } catch (e) { return { 路: "都不通", 码: null, 病: String(e.message).slice(0, 60) }; }
+    }
+    return { 路: "都不通", 码: null, 病: "sms_code.py 读不到信息库（多半没给完全磁盘访问）" };
+  };
+  const 重登 = async (where, 只到发码前 = false) => {
+    足迹.push(`在「${where}」被踹到登录页，自己登回去`);
+    const box = page.locator("#alibaba-login-box, iframe[src*='passport'], iframe[src*='login']").first();
+    try { await box.waitFor({ state: "attached", timeout: 15000 }); }
+    catch {
+      // 9/30 试手逮的：登着的时候去 /login，URL 停在 /login 可正文渲染的是首页（地址、推荐商家全在）——那不是掉门
+      const t = await 文();
+      if (/起送|月售|已售|收货地址|为你推荐/.test(t)) { 足迹.push("登录框没现身、正文已是登着的样子＝没掉门"); return false; }
+      死("登录", "掉登录了，但登录页里没等到那个登录框（页面换皮了？）", { 现场: t.slice(0, 200) });
+    }
+    if (!手机号) 死("登录", "掉登录了，可没人告诉我手机号（参数 phone / TAKEOUT_PHONE / places.json 的 phone）——得人来扫码登回去");
+    const fl = page.frameLocator("#alibaba-login-box, iframe[src*='passport'], iframe[src*='login']").first();
+    const 框里字 = async (loc, n = 60) => { try { return ((await loc.innerText({ timeout: 1500 })) || "").trim().slice(0, n); } catch { return ""; } };
+    // 框是另一个域慢慢装进来的——等手机号框真站出来再读区号，别拿半张框判区号（读空＝不拨＝码发不到这部手机）
+    try { await fl.getByRole("textbox", { name: "请输入手机号" }).waitFor({ timeout: 15000 }); }
+    catch { 死("登录", "掉登录了，登录框装出来了可 15 秒没见手机号那格（框换皮了？）"); }
+    await 慢(1500, 3000);
+    const 勾上 = async () => {     // 勾「已阅读并同意」：先正经点，点不动（格子藏着）就 force 一下；回报勾没勾上
+      const 勾 = fl.getByRole("checkbox").first();
+      if (await 勾.isChecked().catch(() => false)) return true;
+      try { await 勾.click({ timeout: 4000 }); } catch { try { await 勾.click({ force: true, timeout: 3000 }); } catch {} }
+      await 睡(600);
+      return await 勾.isChecked().catch(() => false);
+    };
+    // ① 区号：不是 +86 就拨回 +86（点它→列表里挑「+86 中国大陆」→「确认」）
+    try {
+      let 区 = fl.getByText(/^\+\d{1,4}$/).first();
+      let 现 = await 框里字(区, 8);
+      if (!现) {   // 正则没咬住就退回精确的 "+1"——区号拨不回 +86，码就发不到这部手机，后面全白搭
+        const 备 = fl.getByText("+1", { exact: true }).first();
+        if (await 备.count().catch(() => 0)) { 区 = 备; 现 = "+1"; }
+      }
+      if (现 && 现 !== "+86") {
+        await 区.click(); await 慢(1200, 2200);
+        await fl.getByText("+86 中国大陆").click(); await 慢(800, 1500);
+        await fl.getByRole("link", { name: "确认" }).click(); await 慢(1000, 1800);
+        足迹.push(`区号 ${现} → ${await 框里字(区, 8) || "+86"}`);
+      } else 足迹.push(`区号已是 ${现 || "?"}`);
+    } catch (e) { 足迹.push("区号没拨动：" + String(e.message).slice(0, 50)); }
+    // ② 手机号（框里残留的先清掉）
+    try {
+      const 号框 = fl.getByRole("textbox", { name: "请输入手机号" });
+      await 号框.click(); await 睡(300);
+      if (await 号框.inputValue().catch(() => "")) { await 号框.fill(""); await 睡(300); }
+      await 号框.pressSequentially(手机号, { delay: 90 + Math.floor(Math.random() * 90) });
+      足迹.push("填了手机号");
+    } catch (e) { 死("登录", "掉登录了，登录页的手机号框填不进去：" + String(e.message).slice(0, 60)); }
+    await 慢(1200, 2400);
+    // ③ 先勾协议（不勾＝码不出门）
+    try { 足迹.push((await 勾上()) ? "协议勾上了" : "协议那格没勾上（照旧往下试）"); }
+    catch (e) { 足迹.push("协议勾不着：" + String(e.message).slice(0, 50)); }
+    await 慢(1000, 2000);
+    if (只到发码前) { 足迹.push("试手到此为止：没发码"); return true; }
+    // ④ 发码——只发这一次
+    const 发码时刻 = Date.now() - 20 * 1000;      // 信息库的时钟和这儿差几秒也不冤枉新码
+    try {
+      await fl.getByRole("link", { name: "获取验证码" }).click();
+      try { await fl.getByText(/\d+秒后重发/).first().waitFor({ timeout: 8000 }); 足迹.push("码发出去了（按钮进了倒计时）"); }
+      catch {
+        // 没进倒计时：多半是协议没勾上（toast「请阅读并同意协议」），再勾一次再按一次；还不行就收手
+        足迹.push("按了获取验证码但没进倒计时，再勾一次协议重按");
+        try { await 勾上(); } catch {}
+        await 慢(1000, 1800);
+        await fl.getByRole("link", { name: "获取验证码" }).click();
+        try { await fl.getByText(/\d+秒后重发/).first().waitFor({ timeout: 8000 }); 足迹.push("第二下按进倒计时了"); }
+        catch { 死("登录", "掉登录了，「获取验证码」按了两下都没进倒计时（协议没勾上？还是换皮了）"); }
+      }
+    } catch (e) { 死("登录", "掉登录了，「获取验证码」按不着：" + String(e.message).slice(0, 60)); }
+    // 滑块真露脸了＝人来划，机器不碰
+    try {
+      const 滑块 = fl.locator("#nocaptcha-smsLogin, .nc_wrapper, .nc-container, [id*='nocaptcha']").first();
+      if (await 滑块.isVisible({ timeout: 1500 }).catch(() => false)) {
+        if (process.env.SHOP_CHROME_SHOW) { try { require("child_process").execSync(process.env.SHOP_CHROME_SHOW, { timeout: 15000, stdio: "ignore" }); } catch {} }
+        死("验证", "登录页发码后弹了滑块——手收了，等人划一下，下回再登", { 要她划: true });
+      }
+    } catch {}
+    // ⑤ 等码：每 5 秒看一眼信息库，最多 100 秒
+    let 码 = null, 路 = "", 病 = "";
+    for (let i = 0; i < 20 && !码; i++) {
+      await 睡(5000);
+      const r = 读码(发码时刻);
+      路 = r.路; 病 = r.病 || ""; 码 = r.码;
+    }
+    if (!码) 死("登录", `掉登录了，码发出去了但 100 秒没在这台 Mac 的「信息」里等到平台的短信（读码走的「${路}」${病 ? "·" + 病 : ""}）——` +
+                     "手机的短信同步没到？或读码没权限；这回不重发码，下回再登");
+    足迹.push(`读到码（${路}·${码.at}）`);
+    await 慢(1500, 3000);
+    // ⑥ 填码、登录、等跳走
+    try {
+      const 码框 = fl.getByRole("textbox", { name: "请输入验证码" });
+      await 码框.click(); await 睡(300);
+      await 码框.pressSequentially(码.code, { delay: 110 + Math.floor(Math.random() * 90) });
+      await 慢(1000, 2000);
+      await fl.getByRole("button", { name: "同意协议并登录" }).click();
+    } catch (e) { 死("登录", "掉登录了，码读到了但填码/按登录那一下没成：" + String(e.message).slice(0, 60)); }
+    try { await page.waitForURL((u) => !/\/login/.test(u.toString()), { timeout: 20000 }); }
+    catch {
+      let 错 = "";
+      try { 错 = await 框里字(fl.locator("[class*='error' i],[class*='err-' i],[class*='msg' i],[class*='toast' i]").first(), 60); } catch {}
+      死("登录", "掉登录了，码也填了，按了登录 20 秒还在登录页" + (错 ? `（框里说：${错}）` : ""));
+    }
+    await 慢(2000, 3500);
+    足迹.push("登回去了 → " + page.url().replace(/\?.*$/, ""));
+    console.error("掉登录·自己登回去了（" + where + "）");
+    return true;
+  };
+  // 掉门就重登、再回到本来要去的那页（等 等() 为真才算到；等不到照旧往下走，让后面的判据说话）
+  const 保登录 = async (where, 回到, 等 = null) => {
+    if (!/\/login/.test(page.url())) return false;
+    await 重登(where);
+    if (回到) {
+      await page.goto(回到, { waitUntil: "domcontentloaded" });
+      if (等) { try { await page.waitForFunction(等, null, { timeout: 20000 }); } catch {} }
+      await 慢(1500, 3000);
+    }
+    return true;
+  };
+
   // 收银台那一段（8/14 抽出来）：正常那条路走到这儿要用，「续付」那条路也要用。
   // ⚠️8/14 十四诊：收银台是**两页**，而且最后那颗叫「确认付款」不是「确认支付」——
   //   差一个字，我点了个空，订单就那么挂着。所以：认这一族词、连按几回，直到密码框或「支付成功」。
@@ -381,6 +544,19 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     }
   };
 
+  // 排障入口（9/30）：`node order.js '{"重登试":true}'`＝只去登录页把区号/填号/勾协议走一遍、**不发码不登录**，
+  //   把足迹带回来；本来就登着（登录页一开就被弹回去）＝报「本来就登着」。`{"重登试":"真"}`＝真登一遍（掉了的时候用）。
+  if (A.重登试) {
+    await page.goto("https://h5.ele.me/login/?redirect=" + encodeURIComponent("https://h5.ele.me/msite/") + "&from=mobile.default",
+                    { waitUntil: "domcontentloaded" });
+    await 慢(2500, 4000);
+    let 登了 = false;
+    if (/\/login/.test(page.url())) 登了 = await 重登("试手", A.重登试 !== "真");
+    if (还原窗) await 还原窗();
+    if (!登了) out({ ok: true, 本来就登着: true, url: page.url().replace(/\?.*$/, ""), 足迹 });
+    out({ ok: true, 试手: A.重登试 === "真" ? "真登了一遍" : "走到发码前就停了", url: page.url().replace(/\?.*$/, ""), 足迹 });
+  }
+
   try {
     // ───── 零之前·先在首页站一会儿（8/14 新加） ─────
     // 今早那趟是「一上来直奔地址簿」：没定位 ＋ 直扑地址页，两个可疑信号叠一块儿。
@@ -403,6 +579,9 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
                 return t.length > 20 && !/正在获取定位|定位获取失败/.test(t); },
         null, { timeout: 25000 });
     } catch {}
+    // 9/30：首页就被踹去登录页＝先登回来再站（掉门的长相之一：首页只剩备案页脚，几秒后 URL 落到 /login）
+    await 保登录("首页", "https://h5.ele.me/msite/",
+                 () => { const t = (document.body && document.body.innerText) || ""; return t.length > 20 && !/正在获取定位/.test(t); });
     await 晃();
     await 查验证("首页");
     console.error("首页 → " + (await 文()).split("\n").slice(0, 4).join(" / ").slice(0, 90));
@@ -478,6 +657,9 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       try {
         await page.waitForFunction((k) => (document.body.innerText || "").includes(k), 认, { timeout: 18000 });
       } catch {}
+      // 9/30：没登录连地址簿都是空的（两回「地址簿里没找到那个地址」都是掉登录的冤案）——踹到登录页就登回来再等一遍
+      await 保登录("地址页", "https://h5.ele.me/minisite/pages-poi/address/index?bizType=HOME_PAGE&from=mobile.default");
+      if (!(await 文()).includes(认)) { try { await page.waitForFunction((k) => (document.body.innerText || "").includes(k), 认, { timeout: 12000 }); } catch {} }
       await 慢();
       await 查验证("地址页");
       const 切了 = await page.evaluate((k) => {
@@ -505,8 +687,9 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     //   （带了坐标＝平台以坐标为准，刚切的地址白切）。所以：**切过地址就一个坐标都别带**，
     //   让平台自己按账号当前地址定位；没切地址时才用她家那组兜底。
     const 坐标 = (ADDR || !LAT || !LNG) ? "" : `&latitude=${LAT}&longitude=${LNG}${GEO ? "&geohash=" + GEO : ""}`;
-    await page.goto(`https://h5.ele.me/minisearch/result?keyword=${q}${坐标}` +
-      `&from=mobile.default&refer=%E7%9B%B4%E6%8E%A5%E6%90%9C%E7%B4%A2`, { waitUntil: "domcontentloaded" });
+    const 搜索URL = `https://h5.ele.me/minisearch/result?keyword=${q}${坐标}` +
+      `&from=mobile.default&refer=%E7%9B%B4%E6%8E%A5%E6%90%9C%E7%B4%A2`;
+    await page.goto(搜索URL, { waitUntil: "domcontentloaded" });
     // ⚠️闪购这页是 Tiga 渲染，骨架先到、货后到——死等秒数没用，得等「起送¥」真出现（8/13 一诊）
     try {
       await page.waitForFunction(() => /起送|配送费|月售|已售/.test(document.body.innerText || ""), null, { timeout: 20000 });   // 8/16：整页免起送时「起送¥」永不出现，别白等20秒
@@ -515,8 +698,10 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     await 慢();
     await 查验证("搜索页");
     // 8/17 进门先验票补针：那天登录页是 Tiga 空壳、页面一个字都读不出，光认字的验票没喊出声——
-    // 被踹去 /login 的 URL 才是铁证；两样都认，掉门就明说，别再揣着空页面报「没搜到店」害她白饿。
-    if (/\/login/.test(page.url()) || /登录|请先登录/.test(await 文())) 死("登录", "淘宝登录态掉了，得让她扫码：把那间 Chrome 带窗打开重新登录");
+    // 被踹去 /login 的 URL 才是铁证。9/30 起掉门不再撒手报「登录」：自己登回去、再回到搜索页接着走
+    // （重登要一分钟上下；登回来那页是 redirect 带回来的，仍旧重开一遍搜索页）。
+    await 保登录("搜索页", 搜索URL, () => /起送|配送费|月售|已售/.test(document.body.innerText || ""));
+    if (/\/login/.test(page.url())) 死("登录", "登录态掉了，自己也没登回去：把那间 Chrome 带窗打开，人来登一回");
 
     // 抓店铺卡：认「起送¥」+「分」的块，取综合排序第一家（她要的是快、稳，不是最便宜）
     // ⚠️别拿卡片首行当店名去点（8/13 二诊：首行常是「商家自配送」「本店近期209人好评」这类角标，
