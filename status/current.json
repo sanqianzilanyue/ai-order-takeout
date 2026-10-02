@@ -1,0 +1,8 @@
+{
+  "task": "建立长期 Codex 工作流规则",
+  "branch": "task_001_status-handoff",
+  "status": "done",
+  "step": "完成工作流规则文档和状态字段更新",
+  "message": "CODEX_WORKFLOW.md 已建立，current status 已按统一状态规范更新。",
+  "updated_at": "2026-08-27T18:30:15+08:00"
+}
