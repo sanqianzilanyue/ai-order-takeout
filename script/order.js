@@ -4,7 +4,7 @@
 //
 // 走的是一间登录态长住的 Chrome（CDP 9222·淘宝扫码登录态原样）里的饿了么 H5＝淘宝闪购。
 // 整条路是 8/13 夜我亲手付成第一单趟出来的，
-// 八十六个坑全写在教程里 https://sanqianzilanyue.github.io/ai-order-takeout/ ——改这支脚本前先读那篇。
+// 坑全写在教程里 https://sanqianzilanyue.github.io/ai-order-takeout/ ——改这支脚本前先读那篇。
 // 怎么起那间 Chrome、坐标和支付口令放哪儿：见同目录 README.md。
 //
 // 用法：
@@ -39,12 +39,31 @@ const 短词 = (!DISH && (A.kw || "").trim().length >= 2) ? A.kw.trim() : "";
 //   口语拆规格：把头尾的杯型（大杯/超大杯/中杯）一律剥下来；冰/热/去冰/少冰只在剩下的像饮品时才剥
 //   （「热干面」「冰粉」「冰糖葫芦」是菜名，别剥）。剥下来的词当规格；挑名时先拿原词对，对不上再拿核对。
 const 杯型词 = /^(超大杯|大杯|中杯|小杯)|(超大杯|大杯|中杯|小杯)$/;
+// ⭐10/17 晚·鸡柳大人案（她要大份、啥都行·上游填成 dish「大份鸡柳」·两家翻完空手）：份量跟杯型一样是规格不是名——
+//   「大份鸡柳」剥成「鸡柳」＋规格「大份」，菜单上那桶「香酥鸡柳自选」才对得上，大份在规格面板里挑。
+const 份量词 = /^(特大份|超大份|大份|中份|小份|大桶|中桶|小桶)|(特大份|超大份|大份|中份|小份|大桶|中桶|小桶)$/;
 const 温度词 = /^(冰的|热的|去冰|少冰|常温|冰|热|温)|(冰的|热的|去冰|少冰|常温)$/;
 const 饮品样 = /(美式|拿铁|咖啡|摩卡|卡布|澳白|馥芮白|燕麦|奶茶|奶盖|果茶|柠檬|柚|椰|可可|抹茶|豆浆|乌龙|红茶|绿茶|茉莉|茶|汁|奶|咖)/;
+// 10/17：她的忌口——她没点名就默认绕开（往后排/不拿来兜底），她点了名照她的
+const 忌口词 = /麻薯|麻糬|糍粑|青团|糯|珍珠|芋圆|小圆子|西米|年糕|汤圆|元宵|粽|驴打滚|辣条|麻辣/;
+// 10/17：没点名、要挑月售王兜底的时候也得过忌口；她要的是喝的，就别端吃的（17:31 「热可可」整本没对上→月售王端了块苹果肉桂卷）
+const 兜底筛 = (m) => !!(m && m.name) && !忌口词.test(m.name) && !(饮品样.test(短词 || (A.kw || "")) && !饮品样.test(m.name));
+// ⭐10/15 热可可三分糖案（15:00 定时单拿「热可可 三分糖」整串当菜名，三家翻完报没有）：「三分糖」「半糖」「去冰」这类是规格不是名——
+//   先把它们从词里摘出来当规格（空格隔开的、粘在一起的都算），剩下的才是菜名。
+const 单规 = /^(超大杯|大杯|中杯|小杯|特大份|超大份|大份|中份|小份|大桶|中桶|小桶|三分糖|五分糖|七分糖|三分甜|五分甜|七分甜|半糖|少糖|微糖|不加糖|无糖|全糖|多糖|正常糖|标准糖|少冰|去冰|多冰|正常冰|常温|温热|热的|冰的|热|冰)$/;
+const 甜度词 = /(三分糖|五分糖|七分糖|三分甜|五分甜|七分甜|半糖|少糖|微糖|不加糖|无糖|全糖|多糖|正常糖|标准糖|少冰|去冰|多冰|正常冰)/g;
 const 拆口语 = (s0) => {
   let 核 = (s0 || "").trim(), 规 = [];
+  const 块 = 核.split(/\s+/).filter(Boolean);
+  if (块.length > 1) {
+    const 留 = 块.filter((x) => !单规.test(x));
+    for (const x of 块) if (单规.test(x)) 规.push(x.replace(/的$/, ""));
+    if (留.length) 核 = 留.join("");
+  }
+  核 = 核.replace(甜度词, (m) => { 规.push(m); return ""; }).trim() || 核;
   for (let i = 0; i < 4; i++) {
     let m = 核.match(杯型词);
+    if (!m) m = 核.match(份量词);
     if (!m) { m = 核.match(温度词); if (m && !饮品样.test(核.replace(温度词, ""))) m = null; }
     if (!m) break;
     const 词 = m[1] || m[2];
@@ -60,6 +79,11 @@ const 自动规格 = new Set();
     A.规格 = [...(A.规格 || [])];
     for (const g of 口.规) if (!A.规格.includes(g)) { A.规格.push(g); 自动规格.add(g); }
   } }
+// 10/15：甜度、空格隔开的规格摘掉之后，菜名本身也得换掉（「热可可 三分糖」→ 找「热可可」）；冰/热/杯型照旧留在词里，挑名核和准()自己会剥
+const 去甜 = (s) => { let x = (s || "").trim(); const 块 = x.split(/\s+/).filter(Boolean);
+  if (块.length > 1) { const 留 = 块.filter((t) => !单规.test(t)); if (留.length) x = 留.join(""); }
+  甜度词.lastIndex = 0; return (x.replace(甜度词, "").trim() || x); };
+if (DISH && 去甜(DISH) !== DISH) DISH = 去甜(DISH);
 const SHOP = A.shop || "";
 const MAX = Number(A.max ?? 50);
 const QTY = Math.max(1, Number(A.qty ?? 1));      // 几杯（8/14 她点两杯茶：一杯不起送）
@@ -78,7 +102,16 @@ const 口令 = () => {
   try { return fs.readFileSync(path.join(os.homedir(), ".takeout_pay"), "utf8").trim(); } catch { return ""; }
 };
 
-const out = (o) => { console.log(JSON.stringify(o)); process.exit(o.ok ? 0 : 1); };
+const out = (o) => {
+  console.log(JSON.stringify(o));
+  // ⭐10/6 她：「长时间停在页面不动就会触发验证」「不用的时候关掉页面更好吗」——用完（成没成都一样）把那间 Chrome那页关成空白，
+  //   别在店里/结算页干站着招验证。out 必须照旧同步退出（死() 后面的代码不许再跑），所以另起一个脱身的小进程去关。
+  //   撞验证/掉登录不关：那页是留给她划、给她登的。
+  if (!/验证|登录/.test(o.stage || "")) {
+    try { require("child_process").spawn(process.execPath, [require("path").join(__dirname, "手.js"), "去", "about:blank"], { detached: true, stdio: "ignore" }).unref(); } catch {}
+  }
+  process.exit(o.ok ? 0 : 1);
+};
 const 死 = (stage, why, extra = {}) => out({ ok: false, stage, why, ...((globalThis.__足迹 && !extra.足迹) ? { 足迹: globalThis.__足迹 } : {}), ...extra });   // 8/23：足迹永远随死讯带回
 const 睡 = (ms) => new Promise((r) => setTimeout(r, ms));
 const 数 = (s) => { const m = String(s || "").match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : NaN; };
@@ -115,6 +148,15 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         got = true; break;
       } catch (e) {
         try { if (Date.now() - fsL.statSync(LOCK).mtimeMs > 10 * 60 * 1000) { fsL.rmSync(LOCK, { recursive: true, force: true }); continue; } } catch (e2) {}
+        // 10/11：锁主已经不在了（被掐掉的手不走 exit 那条路、锁没撤）＝当场认尸清锁，别让她干等十分钟
+        try {
+          const 主 = Number(fsL.readFileSync(LOCK + "/pid", "utf8").trim());
+          if (主 > 0 && 主 !== process.pid) {
+            let 活 = true;
+            try { process.kill(主, 0); } catch (e3) { 活 = e3.code === "EPERM"; }
+            if (!活) { fsL.rmSync(LOCK, { recursive: true, force: true }); continue; }
+          }
+        } catch (e2) {}
         await 睡(4000);
       }
     }
@@ -271,7 +313,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     } catch {}
     if (!验证词.test(t) && !元素) return;
     // 把那间 Chrome 从屏幕外挪回来给她划验证：环境变量 SHOP_CHROME_SHOW 填一条 shell 命令（没填就只报讯不挪窗）
-    if (process.env.SHOP_CHROME_SHOW) { try { require("child_process").execSync(process.env.SHOP_CHROME_SHOW, { timeout: 15000, stdio: "ignore" }); } catch {} }
+    try { (process.env.SHOP_CHROME_SHOW && require("child_process").execSync(process.env.SHOP_CHROME_SHOW, { timeout: 15000, stdio: "ignore" })); } catch {}
     死("验证", `在「${where}」撞上人机验证了——手已经收了，窗子给她弹到屏内，她划一下就过（这题机器不许碰）`,
        { 要她划: true });
   };
@@ -359,7 +401,8 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
   //   没权限的进程可以填环境变量 TAKEOUT_SMS_CMD＝一条能打印同样 JSON 列表的命令（比如 curl 你自己后端的一个接口）。
   //   ⚠️iframe 跨域：page.evaluate 一个字都读不到框里，掉门只认 URL 里的 /login；框里的手全走 frameLocator。
   //   ⚠️别拿 查验证 去看登录框——框里「获取验证码」四个字会撞验证词（好在 innerText 读不到框里，至今没误伤）。
-  //   ⚠️码只认「按了获取之后」到的、正文带平台名的那条；100 秒没到＝收手报「登录」，**不重发**（连着发码＝风控脸）。
+  //   ⚠️码只认「按了获取之后」到的、正文带平台名的那条；100 秒没到＝按一次「重新发送」再等 100 秒（10/18 头一回真跑：
+  //     头一条码按了倒计时却根本没到手机，重发 7 秒就到），还没到才收手报「登录」；别再多发（连着发码＝风控脸）。
   //   ⚠️发码后那个滑块常驻 DOM 但 display:none；真露脸了＝交给人划，机器不碰（同 查验证 的规矩）。
   //   手机号别写进脚本（它迟早会被 push 出去）：参数 phone，或环境变量 TAKEOUT_PHONE，或 ~/.takeout/places.json 里的 "phone"。
   const 手机号 = String(A.phone || process.env.TAKEOUT_PHONE || 地点簿.phone || "");
@@ -396,6 +439,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     return { 路: "都不通", 码: null, 病: "sms_code.py 读不到信息库（多半没给完全磁盘访问）" };
   };
   const 重登 = async (where, 只到发码前 = false) => {
+    if (A.不发码 && !只到发码前) {   // 10/15 凌晨一度按「定时单不发码」做的，她说以为那是风控验证码、让照旧自己登——撤回：定时单照旧自己登；
+                                      //   这道闸留给明说 不发码:true 的单（她哪天真不想手机上收码再用）
+      足迹.push(`在「${where}」被踹到登录页——这是定时单，没敢往你手机发验证码`);
+      死("登录", "登录掉了。这是你定好的点、你不在跟前，我没敢往你手机发验证码——回我一句「登」，我当场登回去把这单买了。");
+    }
     足迹.push(`在「${where}」被踹到登录页，自己登回去`);
     const box = page.locator("#alibaba-login-box, iframe[src*='passport'], iframe[src*='login']").first();
     try { await box.waitFor({ state: "attached", timeout: 15000 }); }
@@ -408,7 +456,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     if (!手机号) 死("登录", "掉登录了，可没人告诉我手机号（参数 phone / TAKEOUT_PHONE / places.json 的 phone）——得人来扫码登回去");
     const fl = page.frameLocator("#alibaba-login-box, iframe[src*='passport'], iframe[src*='login']").first();
     const 框里字 = async (loc, n = 60) => { try { return ((await loc.innerText({ timeout: 1500 })) || "").trim().slice(0, n); } catch { return ""; } };
-    // 框是另一个域慢慢装进来的——等手机号框真站出来再读区号，别拿半张框判区号（读空＝不拨＝码发不到这部手机）
+    // 框是另一个域慢慢装进来的——等手机号框真站出来再读区号，别拿半张框判区号（读空＝不拨＝码发去美国）
     try { await fl.getByRole("textbox", { name: "请输入手机号" }).waitFor({ timeout: 15000 }); }
     catch { 死("登录", "掉登录了，登录框装出来了可 15 秒没见手机号那格（框换皮了？）"); }
     await 慢(1500, 3000);
@@ -419,11 +467,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       await 睡(600);
       return await 勾.isChecked().catch(() => false);
     };
-    // ① 区号：不是 +86 就拨回 +86（点它→列表里挑「+86 中国大陆」→「确认」）
+    // ① 区号：跟着线路显 +1 就拨回 +86（点它→列表里挑「+86 中国大陆」→「确认」）
     try {
       let 区 = fl.getByText(/^\+\d{1,4}$/).first();
       let 现 = await 框里字(区, 8);
-      if (!现) {   // 正则没咬住就退回精确的 "+1"——区号拨不回 +86，码就发不到这部手机，后面全白搭
+      if (!现) {   // 正则没咬住就退回 9/14 那天点中的那只（精确 "+1"）——区号拨不回 +86，码就发去了美国，后面全白搭
         const 备 = fl.getByText("+1", { exact: true }).first();
         if (await 备.count().catch(() => 0)) { 区 = 备; 现 = "+1"; }
       }
@@ -434,13 +482,13 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         足迹.push(`区号 ${现} → ${await 框里字(区, 8) || "+86"}`);
       } else 足迹.push(`区号已是 ${现 || "?"}`);
     } catch (e) { 足迹.push("区号没拨动：" + String(e.message).slice(0, 50)); }
-    // ② 手机号（框里残留的先清掉）
+    // ② 她的号（框里残留的先清掉）
     try {
       const 号框 = fl.getByRole("textbox", { name: "请输入手机号" });
       await 号框.click(); await 睡(300);
       if (await 号框.inputValue().catch(() => "")) { await 号框.fill(""); await 睡(300); }
       await 号框.pressSequentially(手机号, { delay: 90 + Math.floor(Math.random() * 90) });
-      足迹.push("填了手机号");
+      足迹.push("填了她的号");
     } catch (e) { 死("登录", "掉登录了，登录页的手机号框填不进去：" + String(e.message).slice(0, 60)); }
     await 慢(1200, 2400);
     // ③ 先勾协议（不勾＝码不出门）
@@ -449,8 +497,15 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     await 慢(1000, 2000);
     if (只到发码前) { 足迹.push("试手到此为止：没发码"); return true; }
     // ④ 发码——只发这一次
-    const 发码时刻 = Date.now() - 20 * 1000;      // 信息库的时钟和这儿差几秒也不冤枉新码
+    let 发码时刻 = Date.now() - 20 * 1000;        // 信息库的时钟和这儿差几秒也不冤枉新码（10/18 重发一次时会往后拨）
+    // 掐表（10/8 她问「收到码到填码要多久、能不能一分钟内」——此前没记过秒数，这回记进足迹）
+    const 掐 = { 按发码: 0, 读到: 0 };
+    const 秒 = (a, b) => ((b - a) / 1000).toFixed(1);
+    // 10/8 实测：Mac 上「信息」app 没开着时，她手机转来的短信拖了 5 分 15 秒才落库（蓝泡泡 iMessage 几秒就到）；
+    //   按发码前先把它在后台拉起来（-g 不抢前台）。是不是真病根等她回家再验；拉一下没坏处。
+    try { require("child_process").execFileSync("/usr/bin/open", ["-g", "-a", "Messages"], { timeout: 8000, stdio: "ignore" }); 足迹.push("先把 Mac 的「信息」app 拉起来等码"); } catch {}
     try {
+      掐.按发码 = Date.now();
       await fl.getByRole("link", { name: "获取验证码" }).click();
       try { await fl.getByText(/\d+秒后重发/).first().waitFor({ timeout: 8000 }); 足迹.push("码发出去了（按钮进了倒计时）"); }
       catch {
@@ -463,24 +518,44 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         catch { 死("登录", "掉登录了，「获取验证码」按了两下都没进倒计时（协议没勾上？还是换皮了）"); }
       }
     } catch (e) { 死("登录", "掉登录了，「获取验证码」按不着：" + String(e.message).slice(0, 60)); }
-    // 滑块真露脸了＝人来划，机器不碰
+    // 滑块真露脸了＝她来划，机器不碰
     try {
       const 滑块 = fl.locator("#nocaptcha-smsLogin, .nc_wrapper, .nc-container, [id*='nocaptcha']").first();
       if (await 滑块.isVisible({ timeout: 1500 }).catch(() => false)) {
-        if (process.env.SHOP_CHROME_SHOW) { try { require("child_process").execSync(process.env.SHOP_CHROME_SHOW, { timeout: 15000, stdio: "ignore" }); } catch {} }
-        死("验证", "登录页发码后弹了滑块——手收了，等人划一下，下回再登", { 要她划: true });
+        try { (process.env.SHOP_CHROME_SHOW && require("child_process").execSync(process.env.SHOP_CHROME_SHOW, { timeout: 15000, stdio: "ignore" })); } catch {}
+        死("验证", "登录页发码后弹了滑块——手收了，窗子弹到她面前，她划一下我下回再登", { 要她划: true });
       }
     } catch {}
     // ⑤ 等码：每 5 秒看一眼信息库，最多 100 秒
+    // ⭐10/18 头一回真跑：头一条码按了倒计时却从没到过她手机（别的短信照常落 Mac），100 秒后我手按「重新发送」7 秒就到了——
+    //   所以 100 秒没到＝按一次「重新发送」再等 100 秒（人也是这么做的），只重发这一回；再没到才收手。
     let 码 = null, 路 = "", 病 = "";
-    for (let i = 0; i < 20 && !码; i++) {
-      await 睡(5000);
-      const r = 读码(发码时刻);
-      路 = r.路; 病 = r.病 || ""; 码 = r.码;
+    for (let 轮 = 0; 轮 < 2 && !码; 轮++) {
+      if (轮 === 1) {
+        try {
+          const 重发 = fl.locator("text=/^(重新发送|重新获取|获取验证码)$/").first();
+          if (!(await 重发.isVisible({ timeout: 3000 }).catch(() => false))) break;
+          await 重发.click({ timeout: 8000 });
+          发码时刻 = Date.now() - 15000;
+          足迹.push("100 秒没等到码，按了一次「重新发送」再等 100 秒");
+          await 睡(2500);
+          const 滑块 = fl.locator("#nocaptcha-smsLogin, .nc_wrapper, .nc-container, [id*='nocaptcha']").first();
+          if (await 滑块.isVisible({ timeout: 1500 }).catch(() => false)) {
+            死("验证", "重发码时弹了滑块——手收了，窗子弹到她面前，她划一下我下回再登", { 要她划: true });
+          }
+        } catch { break; }
+      }
+      for (let i = 0; i < 20 && !码; i++) {
+        await 睡(5000);
+        const r = 读码(发码时刻);
+        路 = r.路; 病 = r.病 || ""; 码 = r.码;
+      }
     }
-    if (!码) 死("登录", `掉登录了，码发出去了但 100 秒没在这台 Mac 的「信息」里等到平台的短信（读码走的「${路}」${病 ? "·" + 病 : ""}）——` +
-                     "手机的短信同步没到？或读码没权限；这回不重发码，下回再登");
-    足迹.push(`读到码（${路}·${码.at}）`);
+    if (!码) 死("登录", `掉登录了，码发出去了（含重发一次）但 200 秒没在这台 Mac 的「信息」里等到闪购的短信（读码走的「${路}」${病 ? "·" + 病 : ""}）——` +
+                     "她手机的短信同步没到？或读码没权限；这回不再发码，下回再登");
+    掐.读到 = Date.now();
+    const 落库 = Date.parse(String(码.at || "").replace(" ", "T"));
+    足迹.push(`读到码（${路}·短信 ${码.at}·按发码起 ${秒(掐.按发码, 掐.读到)}s` + (isFinite(落库) ? `·短信落库起 ${秒(落库, 掐.读到)}s` : "") + "）");
     await 慢(1500, 3000);
     // ⑥ 填码、登录、等跳走
     try {
@@ -489,6 +564,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       await 码框.pressSequentially(码.code, { delay: 110 + Math.floor(Math.random() * 90) });
       await 慢(1000, 2000);
       await fl.getByRole("button", { name: "同意协议并登录" }).click();
+      足迹.push(`码填完按了登录（读到码起 ${秒(掐.读到, Date.now())}s）`);
     } catch (e) { 死("登录", "掉登录了，码读到了但填码/按登录那一下没成：" + String(e.message).slice(0, 60)); }
     try { await page.waitForURL((u) => !/\/login/.test(u.toString()), { timeout: 20000 }); }
     catch {
@@ -497,8 +573,8 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       死("登录", "掉登录了，码也填了，按了登录 20 秒还在登录页" + (错 ? `（框里说：${错}）` : ""));
     }
     await 慢(2000, 3500);
-    足迹.push("登回去了 → " + page.url().replace(/\?.*$/, ""));
-    console.error("掉登录·自己登回去了（" + where + "）");
+    足迹.push("登回去了 → " + page.url().replace(/\?.*$/, "") + `（按发码→登回去 ${秒(掐.按发码, Date.now())}s）`);
+    console.error("掉登录·自己登回去了（" + where + "·按发码→登回去 " + 秒(掐.按发码, Date.now()) + "s" + (isFinite(落库) ? "·短信落库→读到 " + 秒(落库, 掐.读到) + "s" : "") + "）");
     return true;
   };
   // 掉门就重登、再回到本来要去的那页（等 等() 为真才算到；等不到照旧往下走，让后面的判据说话）
@@ -544,7 +620,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     }
   };
 
-  // 排障入口（9/30）：`node order.js '{"重登试":true}'`＝只去登录页把区号/填号/勾协议走一遍、**不发码不登录**，
+  // 排障入口（9/30）：`node 点外卖.js '{"重登试":true}'`＝只去登录页把区号/填号/勾协议走一遍、**不发码不登录**，
   //   把足迹带回来；本来就登着（登录页一开就被弹回去）＝报「本来就登着」。`{"重登试":"真"}`＝真登一遍（掉了的时候用）。
   if (A.重登试) {
     await page.goto("https://h5.ele.me/login/?redirect=" + encodeURIComponent("https://h5.ele.me/msite/") + "&from=mobile.default",
@@ -651,14 +727,14 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     if (ADDR) {
       const 认表 = Object.assign({}, 地点簿.认 || {}, A.认 || {});
       const 认 = 认表[ADDR] || ADDR;
-      await page.goto("https://h5.ele.me/minisite/pages-poi/address/index?bizType=HOME_PAGE&from=mobile.default",
-                      { waitUntil: "domcontentloaded" });
+      const 地址页 = "https://h5.ele.me/minisite/pages-poi/address/index?bizType=HOME_PAGE&from=mobile.default";
+      await page.goto(地址页, { waitUntil: "domcontentloaded" });
       // ⚠️等**列表真渲染出来**再找（8/13 十二诊：只等「收货地址」几个字，列表还没到就说找不到）
       try {
         await page.waitForFunction((k) => (document.body.innerText || "").includes(k), 认, { timeout: 18000 });
       } catch {}
-      // 9/30：没登录连地址簿都是空的（两回「地址簿里没找到那个地址」都是掉登录的冤案）——踹到登录页就登回来再等一遍
-      await 保登录("地址页", "https://h5.ele.me/minisite/pages-poi/address/index?bizType=HOME_PAGE&from=mobile.default");
+      // 9/30：没登录连地址簿都是空的（8/17、9/19 两回「地址簿里没找到公司那条」都是掉登录的冤案）——踹到登录页就登回来再等一遍
+      await 保登录("地址页", 地址页);
       if (!(await 文()).includes(认)) { try { await page.waitForFunction((k) => (document.body.innerText || "").includes(k), 认, { timeout: 12000 }); } catch {} }
       await 慢();
       await 查验证("地址页");
@@ -689,19 +765,36 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     const 坐标 = (ADDR || !LAT || !LNG) ? "" : `&latitude=${LAT}&longitude=${LNG}${GEO ? "&geohash=" + GEO : ""}`;
     const 搜索URL = `https://h5.ele.me/minisearch/result?keyword=${q}${坐标}` +
       `&from=mobile.default&refer=%E7%9B%B4%E6%8E%A5%E6%90%9C%E7%B4%A2`;
+    const 有店 = () => /起送|配送费|月售|已售/.test(document.body.innerText || "");
+    // ⭐10/18 水蜜桃案（她说点了两次没成功·今早水蜜桃/桃子/火龙果三趟九张卡全「门没推开」）：搜水果这类词，闪购默认给的是
+    //   【商品卡】——右上角写着「切到店铺」，老筛子把商品卡当店卡点进去，落的是商品页不是店堂。先切到店铺再抄卡（切换是页内状态、URL 不变，
+    //   回搜索/缩词重搜之后都要再看一眼）。
+    const 要店卡 = async (where) => {
+      try {
+        if (!/切到店铺/.test(await 文())) return false;
+        await 点字("切到店铺", "切到店铺（搜出来的是商品卡，换成店卡）");
+        try { await page.waitForFunction(有店, null, { timeout: 15000 }); } catch {}
+        await 慢();
+        足迹.push(`${where}：搜出来的是商品卡，切到了店铺`);
+        return true;
+      } catch { return false; }
+    };
+    let 新零售店 = 0;   // 10/18：进门撞上生鲜/超市那种新零售店堂（newretail ushop）的家数——这只手还只会逛餐馆那种门
     await page.goto(搜索URL, { waitUntil: "domcontentloaded" });
     // ⚠️闪购这页是 Tiga 渲染，骨架先到、货后到——死等秒数没用，得等「起送¥」真出现（8/13 一诊）
     try {
-      await page.waitForFunction(() => /起送|配送费|月售|已售/.test(document.body.innerText || ""), null, { timeout: 20000 });   // 8/16：整页免起送时「起送¥」永不出现，别白等20秒
+      await page.waitForFunction(有店, null, { timeout: 20000 });   // 8/16：整页免起送时「起送¥」永不出现，别白等20秒
     } catch {}
+    // 8/17 进门先验票补针：那天登录页是 Tiga 空壳、页面一个字都读不出，光认字的验票没喊出声——
+    // 被踹去 /login 的 URL 才是铁证。9/30 起掉门不再撒手报「登录」：自己登回去、再回到搜索页接着走
+    // （重登要一分钟上下，正好当「晃」；登回来那页是 redirect 带回来的，仍旧重开一遍正门）。
+    await 保登录("搜索页", 搜索URL, 有店);
+    await 要店卡("搜索页");
     await 晃();                    // 搜出来先扫一眼列表，别一出结果就精准点第一家
     await 慢();
     await 查验证("搜索页");
-    // 8/17 进门先验票补针：那天登录页是 Tiga 空壳、页面一个字都读不出，光认字的验票没喊出声——
-    // 被踹去 /login 的 URL 才是铁证。9/30 起掉门不再撒手报「登录」：自己登回去、再回到搜索页接着走
-    // （重登要一分钟上下；登回来那页是 redirect 带回来的，仍旧重开一遍搜索页）。
-    await 保登录("搜索页", 搜索URL, () => /起送|配送费|月售|已售/.test(document.body.innerText || ""));
-    if (/\/login/.test(page.url())) 死("登录", "登录态掉了，自己也没登回去：把那间 Chrome 带窗打开，人来登一回");
+    if (/\/login/.test(page.url())) 死("登录", "刚自己登回去了，一进搜索页又被踹回登录页——这回不再试（连着敲门＝风控脸），下回再登");
+    if (/请先登录/.test(await 文())) 死("登录", "那间 Chrome里的淘宝登录态掉了，而且登录页的样子我不认得（正文写着「请先登录」、URL 却不是 /login）——去看看它换了什么皮");
 
     // 抓店铺卡：认「起送¥」+「分」的块，取综合排序第一家（她要的是快、稳，不是最便宜）
     // ⚠️别拿卡片首行当店名去点（8/13 二诊：首行常是「商家自配送」「本店近期209人好评」这类角标，
@@ -792,7 +885,12 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       // ⭐8/15 柚见案：她点名了招牌却一家都对不上＝收手报店单，绝不兜底进第一家。
       let c = null;
       if (店含) {
-        const 同牌 = cards.filter((o) => o.t.includes(店含));
+        // ⭐10/6 一点点案：她说「一点点」、店招写「1点点」，招牌就在眼前却报「没一家挂着」——
+        // 对招牌前两边一起归一：汉字数字↔阿拉伯数字、全角↔半角、大小写、空格（只用来比，屏上的真名照旧）
+        const 招牌归一 = (x) => String(x || "").normalize("NFKC").toLowerCase().replace(/\s+/g, "")
+          .replace(/[〇零一二三四五六七八九]/g, (ch) => { const k = "〇零一二三四五六七八九".indexOf(ch); return k <= 1 ? "0" : String(k - 1); });
+        const 牌 = 招牌归一(店含);
+        const 同牌 = cards.filter((o) => 招牌归一(o.t).includes(牌));
         if (!同牌.length) return { 没招牌: cards.slice(0, 6).map((o) => o.t.split(" | ")[0].trim().slice(0, 22)) };
         if (位 - 1 >= 同牌.length) return { 到底了: 同牌.length };   // 这块招牌的分店走完了
         c = 同牌[位 - 1];
@@ -842,7 +940,24 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
           await 到店();
         }
       }
-      if (!/ele-takeout-index/.test(page.url())) return false;
+      if (!/ele-takeout-index/.test(page.url())) {
+        // ⭐10/18 她说点了两次没成功：今早三趟、九张店卡全报「门没推开」——点店卡被踹到了 /login（登录态约四天一掉，这回掉在店门口：
+        //   搜索页还肯出店卡，一推店门就要票）。进店只认店铺页 URL、没认登录页，于是一家家「换下一家」、最后报成「一家能进的店都没有」。
+        //   现在：落在哪儿记进足迹；踹到登录页＝回「掉门」，外头的三家循环登回去、回到搜索页、同一位再敲一次。
+        const u = page.url();
+        if (/newretail\/p\/ushop/.test(u)) {   // 10/18：百果园/切果NOW!这类生鲜店推开的是另一种店堂（newretail ushop）——当晚在百果园一步步学会了，走「生鲜那套手」
+          新零售店++;
+          try { await page.waitForFunction(() => /去结算/.test(document.body.innerText || ""), null, { timeout: 15000 }); } catch {}
+          await 晃(); await 慢();
+          await 查验证("生鲜店铺页");
+          const 真名2 = await page.evaluate(() => { const t = (document.body.innerText || ""); const m = t.match(/\n([^\n]{2,30}\([^\n]{1,20}店\))\n/) || t.match(/\n([^\n]{2,26}店)\n/); return m ? m[1].trim() : ""; });
+          if (真名2 && !/左滑|^进店$/.test(真名2)) 店.name = 真名2;
+          足迹.push(`「${(店.name || "").slice(0, 16)}」是生鲜/超市那种店堂（ushop），走生鲜那套手`);
+          return "生鲜";
+        }
+        足迹.push(`门没推开，落在：${u.replace(/^https?:\/\//, "").slice(0, 80)}`);
+        return /\/login/.test(u) ? "掉门" : false;
+      }
       // ⭐⭐8/17 假门案（她「你重新开个新网页再试一下」一句点醒·当夜手动破的案）：从**搜索页店卡**进来的店堂
       // 是个小柜台——URL 带 menu_extra_info=猜你喜欢／scheme_type=ITEM_STICKY_CATEGORY_SCHEME，
       // 只渲染六样「猜你喜欢」、列表滑不动、左栏分类点不切（八趟白跑、报「整本翻完没这道菜」的真凶）。
@@ -888,12 +1003,195 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         try { await page.waitForFunction(() => /起送¥/.test(document.body.innerText || ""), null, { timeout: 20000 }); } catch {}
         await 慢();
       }
+      await 要店卡("回搜索");
     };
 
     let 店 = { name: "", 起送: 0 };   // 真正定店在挑菜段的三家循环里
     let 店堂URL = "";                 // 8/18：结算前记一笔，dry 收尾回去倒车
 
     // ───── 二、挑菜（指定就照指定；没指定＝月售高、价钱合适的，凑够起送线） ─────
+    // ───── 生鲜/超市店堂（h5.ele.me/newretail/p/ushop）那套手——10/18 夜在百果园(北京北花园店)一步一步学的 ─────
+    //   店堂＝左栏分类＋右栏货架（从搜索页带着词进来，货架头一段「刚刚搜过」就是对上词的货）；卡＝[class*=cardWrapper]/[class*=listItem]
+    //   里带 [class*=addWrap]（那颗橙色「+」）；按「+」直接进车（没有详情页、没有 sku 面板），卡上随即长出步进器「- 1 +」；
+    //   底栏（fixed·含「去结算」）：空车写「¥0 / 配送¥5 / ¥19.9起送」，有货写「1 / ¥25.8 / 免配送费 ¥5 / 打包费¥1 / 去结算」，钱慢两三秒才落；
+    //   底栏左下那只篮子一点＝购物车抽屉（全选／优惠／清空·每行一个步进器）；「清空」→「确定清空购物车？」取消/确定（都在正经 DOM 里，不在影子里）；
+    //   「去结算」→ h5.ele.me/newretail/tr/buy（同页跳）：地址若写「请选择收货地址…请确认」先点「使用」；明细「x1」是小写 x；合计三行「合计/已优惠 ¥5/¥26.8」；
+    //   「提交订单」在底栏（没有 .submit-btn__button）；付款默认支付宝→照旧收银台那套。⚠️「提交订单」之后那段 10/18 没真走过。
+    let 生鲜 = false, 生鲜车前 = NaN, 生鲜没进车 = "";
+    const 齐价 = (s) => (s || "").replace(/(\d)\n\.(\d)/g, "$1.$2");   // 「¥ / 25 / .8」三片拼回 25.8
+    const 生鲜底栏 = async () => {
+      let o = null;
+      try {
+        o = await page.evaluate(() => {
+          const H = innerHeight, W = innerWidth;
+          const es = [...document.querySelectorAll("*")].filter((e) => {
+            const s = getComputedStyle(e); if (s.position !== "fixed" && s.position !== "sticky") return false;
+            const r = e.getBoundingClientRect();
+            return r.bottom > H - 140 && r.width > W * 0.5 && r.height > 30 && r.height < 200 && s.display !== "none" && /去结算|起送/.test(e.innerText || "");
+          });
+          const e = es[es.length - 1]; if (!e) return null;
+          const r = e.getBoundingClientRect();
+          return { 文: e.innerText || "", x: r.x, y: r.y, w: r.width, h: r.height };
+        });
+      } catch {}
+      if (!o) return { 额: NaN, 起送: 0, 差: 0, 文: "", 栏: null };
+      const t = 齐价(o.文).replace(/\n+/g, " ");
+      const 额 = Number((t.match(/¥\s*(\d+(?:\.\d+)?)/) || [])[1]);
+      const 起送 = Number((t.match(/¥\s*(\d+(?:\.\d+)?)\s*起送/) || [])[1] || 0);
+      const 差 = Number((t.match(/(?:还差|差)\s*¥?\s*(\d+(?:\.\d+)?)\s*(?:元)?[^¥]{0,8}?起送/) || [])[1] || 0);
+      return { 额: isFinite(额) ? 额 : NaN, 起送, 差, 文: t, 栏: o };
+    };
+    const 生鲜读架 = () => page.evaluate(() => {
+      document.querySelectorAll("[data-g]").forEach((e) => e.removeAttribute("data-g"));
+      let 卡们 = [...document.querySelectorAll("[class*='listItem'],[class*='cardWrapper'],[class*='goodsItem'],[class*='itemWrap']")]
+        .filter((e) => e.querySelector("[class*='addWrap'],[class*='stepper']") && (e.innerText || "").replace(/\s/g, "").length > 6
+                       && e.getBoundingClientRect().height > 50 && e.getBoundingClientRect().height < 420);
+      卡们 = 卡们.filter((e) => !卡们.some((o) => o !== e && e.contains(o)));
+      const out = [];
+      卡们.forEach((card, i) => {
+        const b = card.querySelector("[class*='addWrap']") || card.querySelector("[class*='stepper']");
+        const 行 = (card.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean);
+        const 价块 = card.querySelector("[class*='newPriceWrap'],[class*='goodsPrice'],[class*='priceWrap'],[class*='price']");
+        const 价文 = ((价块 && 价块.innerText) || card.innerText || "").replace(/(\d)\n\.(\d)/g, "$1.$2").replace(/\n+/g, " ");
+        const 价 = Number((价文.match(/¥\s*(\d+(?:\.\d+)?)/) || [])[1]);
+        const 售 = Number(((card.innerText || "").match(/已售\s*(\d+)/) || [])[1] || 0);
+        const 数 = [...card.querySelectorAll("[class*='stepper'] *")].filter((x) => !x.children.length && /^\d+$/.test((x.innerText || "").trim()))[0];
+        card.setAttribute("data-g", String(i));
+        out.push({ name: (行[0] || "").slice(0, 40), 价, 售, 规格: false, 售罄: /售罄|已售完|补货中|已下架/.test(card.innerText || ""), 能加: !!b,
+                   买过: false, 加料: false, 生鲜: true, 在车: 数 ? Number(数.innerText.trim()) : 0 });
+      });
+      return out.filter((m) => m.name && isFinite(m.价) && m.价 > 0 && m.能加 && !m.售罄 && !/盲盒|盲选|盲喝|随机|神秘|隐藏款|礼盒|果篮|会员/.test(m.name));
+    });
+    const 生鲜标卡 = (name) => page.evaluate((name) => {   // 给货架上名字正好是它的那张卡打标记；回卡上步进器的数（没长步进器＝0）
+      document.querySelectorAll("[data-plus],[data-gcard]").forEach((e) => { e.removeAttribute("data-plus"); e.removeAttribute("data-gcard"); });
+      let 卡们 = [...document.querySelectorAll("[class*='listItem'],[class*='cardWrapper'],[class*='goodsItem'],[class*='itemWrap']")]
+        .filter((e) => e.querySelector("[class*='addWrap'],[class*='stepper']") && ((e.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean)[0] || "").slice(0, 40) === name);
+      卡们 = 卡们.filter((e) => !卡们.some((o) => o !== e && e.contains(o)));
+      const 卡 = 卡们[0]; if (!卡) return null;
+      卡.setAttribute("data-gcard", "1"); 卡.scrollIntoView({ block: "center" });
+      const b = 卡.querySelector("[class*='addWrap']"); if (b) b.setAttribute("data-plus", "1");
+      const 数 = [...卡.querySelectorAll("[class*='stepper'] *")].filter((x) => !x.children.length && /^\d+$/.test((x.innerText || "").trim()))[0];
+      return { 钮: !!b, 数: 数 ? Number(数.innerText.trim()) : 0 };
+    }, name);
+    const 点准字 = async (词, 名, 底 = 0) => {   // 只认整个叶子正好是这几个字的（「清空」别咬到「确定清空购物车？」）
+      const 有 = await page.evaluate(({ 词, 底 }) => {
+        document.querySelectorAll("[data-tap2]").forEach((e) => e.removeAttribute("data-tap2"));
+        const H = innerHeight;
+        const c = [...document.querySelectorAll("*")].filter((e) => {
+          if (e.children.length) return false;
+          if ((e.innerText || "").trim() !== 词) return false;
+          const r = e.getBoundingClientRect();
+          return r.width > 8 && r.height > 8 && r.y > H * 底 && r.y < H;
+        });
+        const e = c[c.length - 1]; if (!e) return false;
+        e.setAttribute("data-tap2", "1"); return true;
+      }, { 词, 底 });
+      if (!有) { 足迹.push(`「${名}」没找着`); return false; }
+      return 鼠标点("[data-tap2='1']", 名);
+    };
+    const 生鲜加购 = async (m, 份 = 1) => {
+      let 前 = 0;
+      for (let k = 0; k < 份; k++) {
+        const 卡 = await 生鲜标卡(m.name);
+        if (!卡 || !卡.钮) { 足迹.push(`货架上没找着「${m.name}」那张卡的「+」`); return false; }
+        if (k === 0) 前 = 卡.数 || 0;
+        await 慢(900, 1700);
+        if (!(await 鼠标点("[data-plus='1']", `「${m.name}」的「+」`))) return false;
+        await 慢(2600, 4000);     // 步进器/底栏慢两三秒
+        await 查验证("生鲜加购");
+        // 有的货按「+」会弹份量/规格面板（10/18 百果园没撞见）——弹了就按面板里的「加入购物车」/「确定」
+        if (await page.evaluate(() => [...document.querySelectorAll("*")].some((x) => !x.children.length && /^(加入购物车|确定|确认)$/.test((x.innerText || "").trim()) && x.getBoundingClientRect().y > innerHeight * 0.5))) {
+          足迹.push(`「${m.name}」按「+」弹了面板，按面板里的钮`);
+          if (!(await 点准字("加入购物车", "面板「加入购物车」", 0.5))) await 点准字("确定", "面板「确定」", 0.5);
+          await 慢(2000, 3200);
+        }
+      }
+      const 卡2 = await 生鲜标卡(m.name);
+      const 数 = 卡2 ? 卡2.数 : -1;
+      const b = await 生鲜底栏();
+      足迹.push(`「${m.name}」按了 ${份} 下「+」：卡上步进器 ${前}→${数}，底栏 ¥${b.额}`);
+      return 数 >= 前 + 份 || (数 === -1 && b.额 > 0);
+    };
+    const 生鲜抽屉开着 = () => page.evaluate(() => [...document.querySelectorAll("*")].some(
+      (x) => !x.children.length && /^(清空|全选)$/.test((x.innerText || "").trim()) && x.getBoundingClientRect().height > 0 && x.getBoundingClientRect().y > innerHeight * 0.3));
+    const 生鲜点篮子 = async () => {   // 底栏左下那只篮子（开/合抽屉都是它）
+      const b = await 生鲜底栏();
+      const H = await page.evaluate(() => innerHeight);
+      const 试 = b.栏 ? [{ x: b.栏.x + 45, y: b.栏.y + b.栏.h - 28 }, { x: b.栏.x + 45, y: b.栏.y + 28 }] : [{ x: 45, y: H - 48 }];
+      const 前 = await 生鲜抽屉开着();
+      for (const q of 试) {
+        await page.mouse.move(q.x - 10, q.y - 10, { steps: 5 }); await 睡(300 + Math.floor(Math.random() * 200));
+        await page.mouse.click(q.x, q.y); await 慢(1800, 2800);
+        await 查验证("生鲜购物车抽屉");
+        if ((await 生鲜抽屉开着()) !== 前) return true;
+      }
+      return false;
+    };
+    const 生鲜开抽屉 = async () => {
+      if (await 生鲜抽屉开着()) return true;
+      if (await 生鲜点篮子()) { 足迹.push("购物车抽屉开了"); return true; }
+      足迹.push("购物车抽屉没打开");
+      return false;
+    };
+    const 生鲜关抽屉 = async () => { try { if (await 生鲜抽屉开着()) await 生鲜点篮子(); } catch {} };
+    const 生鲜整车清空 = async () => {
+      if (!(await 生鲜开抽屉())) return false;
+      if (!(await 点准字("清空", "抽屉里的「清空」", 0.3))) return false;
+      await 慢(1200, 2000);
+      if (!(await 点准字("确定", "「确定清空购物车？」的确定"))) { try { await page.getByText("确定", { exact: true }).last().click({ timeout: 2500 }); } catch {} }
+      await 慢(3000, 4500);
+      const 额 = (await 生鲜底栏()).额;
+      足迹.push(额 > 0 ? `整车清空了底栏还是 ¥${额}` : `整车清空了（底栏 ¥${isNaN(额) ? "?" : 额}）`);
+      await 生鲜关抽屉();
+      return !(额 > 0);
+    };
+    const 生鲜清车 = async () => 生鲜整车清空();
+    const 生鲜撤货 = async () => {
+      const 我加的 = [...选, ...规格选].filter(Boolean);
+      if (!我加的.length) return false;
+      try { if (店堂URL && !/newretail\/p\/ushop/.test(page.url())) { await page.goto(店堂URL, { waitUntil: "domcontentloaded" }); await 慢(2500, 4000); } } catch {}
+      const 额前 = (await 生鲜底栏()).额;
+      // 进门时车是空的＝车里全是我这趟加的，整车清空最干净；进门时车里本来有货＝只按我加的那几行的减号
+      if (生鲜车前 === 0 || isNaN(生鲜车前)) {
+        const 净 = await 生鲜整车清空();
+        足迹.push(净 ? `我这趟加的都撤回去了（底栏 ¥${额前} → ¥0；进门时车是空的，整车清的）` : `车没倒干净（底栏 ¥${额前}）`);
+        return 净;
+      }
+      if (!(await 生鲜开抽屉())) { 足迹.push(`购物车抽屉没打开，撤不了货（底栏 ¥${额前}）`); return false; }
+      let 净 = true;
+      for (const m of 我加的) {
+        let 按 = 0;
+        for (let k = 0; k < 份 + 3; k++) {
+          const 有 = await page.evaluate((name) => {
+            document.querySelectorAll("[data-minus]").forEach((e) => e.removeAttribute("data-minus"));
+            const H = innerHeight;
+            const 叶 = [...document.querySelectorAll("*")].filter((e) => !e.children.length && (e.innerText || "").trim().startsWith(name.slice(0, 12)) && e.getBoundingClientRect().y > H * 0.3);
+            for (const t of 叶) {
+              let p = t.parentElement;
+              for (let k2 = 0; k2 < 7 && p; k2++, p = p.parentElement) {
+                if (p.getBoundingClientRect().height > 260) break;
+                const st = p.querySelector("[class*='stepper']");
+                if (st) { const 减 = st.children[0]; if (减) { 减.setAttribute("data-minus", "1"); return true; } }
+              }
+            }
+            return false;
+          }, m.name);
+          if (!有) break;
+          await 慢(800, 1500);
+          if (!(await 鼠标点("[data-minus='1']", `抽屉里「${m.name}」的减号`))) break;
+          按++;
+          await 慢(1500, 2400);
+        }
+        const 还在 = await page.evaluate((name) => [...document.querySelectorAll("*")].some((e) => !e.children.length && (e.innerText || "").trim().startsWith(name.slice(0, 12)) && e.getBoundingClientRect().y > innerHeight * 0.3), m.name);
+        if (还在) { 净 = false; 足迹.push(`「${m.name}」按了 ${按} 下减号，行还在`); }
+      }
+      await 慢(1500, 2500);
+      const 额 = (await 生鲜底栏()).额;
+      足迹.push(净 ? `我这趟加的都撤回去了（底栏 ¥${额前} → ¥${额}；她原先车里的东西一样没动）` : `有几样撤不回去（底栏 ¥${额前} → ¥${额}）`);
+      await 生鲜关抽屉();
+      return 净;
+    };
+
     const 读菜 = async () => {
     const 菜 = await page.evaluate(() => {
       const 在买过 = (e) => { let p = e; for (let k = 0; k < 7 && p; k++) {
@@ -915,8 +1213,9 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const 手 = (t.match(/预估到手\s*¥?\s*(\d+(?:\.\d+)?)/) || t.match(/¥\s*(\d+(?:\.\d+)?)\s*预估到手/) || [])[1];
         const 售 = Number((t.match(/月售\s*(\d+)/) || [])[1] || 0);
         return { name, 价, 到手: 手 ? Number(手) : NaN, 售, 买过: 在买过(e),
-                 规格: /选规格/.test(t), 售罄: /售罄|已售完/.test(t), 能加: !!e.querySelector(".btn__plus") };
-      }).filter((x) => x.name && !x.售罄 && !x.规格 && x.能加 && isFinite(x.价) && !x.买过);
+                 规格: /选规格/.test(t), 售罄: /售罄|已售完/.test(t), 能加: !!e.querySelector(".btn__plus"),
+                 加料: /单点不送|不单卖|不单独出售|多点不送/.test(t) || /加桶里|限点一份|限一份/.test(name) };   // 10/17：鸡柳大人的「【加量】鸡柳50g（加桶里）」这类单点不送的加料件不是菜
+      }).filter((x) => x.name && !x.售罄 && !x.规格 && x.能加 && isFinite(x.价) && !x.买过 && !/盲喝|盲盒|盲选|随机|神秘|隐藏款/.test(x.name) && !x.加料);   // 10/15：盲盒随机那类永不挑（15:08 那趟端了「【饮品盲喝】随机出品~」）
     });
     // ⚠️咖啡奶茶这类整店都是「选规格」（8/13 实测瑞幸：一个能直接加购的都没有，她最爱的冰美式就卡在这道门）
     // ——所以规格菜也得能点：点开卡片→弹层里每组挑头一个→加入购物车。
@@ -940,8 +1239,9 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const 价 = Number(((t.match(/¥\s*(\d+)\s*\.?\s*(\d+)?/) || [])[1] || "") +
                           ((t.match(/¥\s*(\d+)\s*\.\s*(\d+)/) || [])[2] ? "." + (t.match(/¥\s*(\d+)\s*\.\s*(\d+)/) || [])[2] : ""));
         const 售 = Number((t.match(/月售\s*(\d+)/) || [])[1] || 0);
-        return { i, name, 价, 售, 规格: /选规格/.test(t), 售罄: /售罄|已售完/.test(t), 买过: 在买过(e) };
-      }).filter((x) => x.name && x.规格 && !x.售罄 && isFinite(x.价) && !x.买过);
+        return { i, name, 价, 售, 规格: /选规格/.test(t), 售罄: /售罄|已售完/.test(t), 买过: 在买过(e),
+                 加料: /单点不送|不单卖|不单独出售|多点不送/.test(t) || /加桶里|限点一份|限一份/.test(name) };
+      }).filter((x) => x.name && x.规格 && !x.售罄 && isFinite(x.价) && !x.买过 && !/盲喝|盲盒|盲选|随机|神秘|隐藏款/.test(x.name) && !x.加料);
       // ⭐8/15 晨案：瑞幸式真卡另收一遍——标题=.food-name、按钮=btn_select_spec，
       //   买过面板没有 .food-name，所以这一路天生不咬旧账；价钱从最近带 ¥ 的祖上读。
       const 新 = [...document.querySelectorAll(".food-name")].map((e, i) => {
@@ -950,8 +1250,9 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const name = (e.innerText || "").trim().slice(0, 24);
         const 价 = Number((t.match(/¥\s*(\d+(?:\.\d+)?)/) || [])[1]);
         const 售 = Number((t.match(/月售\s*(\d+)/) || [])[1] || 0);
-        return { i: 1000 + i, name, 价, 售, 规格: /选规格/.test(t), 售罄: /售罄|已售完/.test(t), 买过: 在买过(e) };
-      }).filter((x) => x.name && x.规格 && !x.售罄 && isFinite(x.价) && !x.买过);
+        return { i: 1000 + i, name, 价, 售, 规格: /选规格/.test(t), 售罄: /售罄|已售完/.test(t), 买过: 在买过(e),
+                 加料: /单点不送|不单卖|不单独出售|多点不送/.test(t) || /加桶里|限点一份|限一份/.test(name) };
+      }).filter((x) => x.name && x.规格 && !x.售罄 && isFinite(x.价) && !x.买过 && !/盲喝|盲盒|盲选|随机|神秘|隐藏款/.test(x.name) && !x.加料);
       // 同名时真卡（新）在前压过旧账（老）——挑名先见着谁就是谁
       return [...新, ...老.filter((y) => !新.some((x) => x.name === y.name))];
     });
@@ -1134,6 +1435,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       const 素 = (n) => ((n || "").replace(/^(标准|经典|原味|招牌|普通|纯|鲜萃|经典款|原味款)/, "") === DISH ? 0 : 1);
       const 头 = (n) => ((n || "").startsWith(DISH) ? 0 : 1);                       // 她的词打头的优先（生椰拿铁（首创） > 冰吸生椰拿铁）
       const 裸长 = (n) => (n || "").replace(/[（(【\[][^)）】\]]*[)）】\]]/g, "").length;   // 括号里的「（首创）」不算长
+      const 忌 = (n) => (忌口词.test(DISH) ? 0 : (忌口词.test(n || "") ? 1 : 0));   // 10/17：她没点名年糕/珍珠那类，带的往后排（9/16 默认清淡）
       // ⭐8/30 六窨茉莉奶绿案（她要「六窨茉莉绿茶」，我端了「六窨茉莉奶绿」）：散字对账把奶绿当成绿茶的近亲
       //   （六个字重合五个），而旧的「无奶优先」只在有别的选择时才排奶——只剩奶绿一个就照收。
       //   法＝**奶性一致律**：她的词里没「奶」，带奶/乳/拿铁的一律不算候选；她的词里有「奶」，不带的也不算。
@@ -1159,7 +1461,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const 打分 = (n) => { const bag = [...DISH]; let 同 = 0; for (const ch of n) { const i = bag.indexOf(ch); if (i >= 0) { 同++; bag.splice(i, 1); } } return 同; };
         c = list.filter((m) => m.name && Math.abs(m.name.length - DISH.length) <= 1 &&
           打分(m.name) >= Math.max(4, DISH.length - 1));
-        if (c.length > 1) c = c.sort((x, y) => 打分(y.name) - 打分(x.name) || x.name.length - y.name.length).slice(0, 1);
+        if (c.length > 1) c = c.sort((x, y) => 忌(x.name) - 忌(y.name) || 打分(y.name) - 打分(x.name) || x.name.length - y.name.length).slice(0, 1);
       }
       if (!c.length && DISH.length >= 3) {
         // ⭐8/18 红枣银耳粥案（她今天点粥三连空的头一桩）：曼玲的菜叫「红枣银耳**枸杞**粥」，
@@ -1171,8 +1473,17 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         c = list.filter((m) => m.name && m.name.length > DISH.length &&
           m.name.length - DISH.length <= 3 && 子序(DISH, m.name));
       }
+      if (!c.length && DISH.length >= 4) {
+        // ⭐10/15 牛肉砂锅案（10:40 定时单：砂锅婆的菜叫「【4件套】砂锅水煮豆花牛肉套餐」，她说「牛肉砂锅」——顺序倒了、中间夹着别的字，
+        //   上面各档全不认，三家 176 样翻完报没有）。词袋档：她的词按两字一拆（牛肉／砂锅），菜名去掉【】（）头尾后每一块都含着就认，名字短的在前。
+        //   只算近亲（准() 不认），还会接着翻别家找准的；翻完没有准的才拿它将就——总比空手强。
+        const 裸 = (n) => (n || "").replace(/[（(【\[][^)）】\]]*[)）】\]]/g, "");
+        const 块 = []; for (let i = 0; i + 1 < DISH.length; i += 2) 块.push(DISH.slice(i, i + 2)); if (DISH.length % 2) 块.push(DISH.slice(-2));
+        c = list.filter((m) => m.name && 块.every((b) => 裸(m.name).includes(b))).sort((x, y) => 忌(x.name) - 忌(y.name) || 裸(x.name).length - 裸(y.name).length).slice(0, 1);
+        if (c.length && globalThis.__足迹) globalThis.__足迹.push(`「${DISH}」没有整名对上的，按词袋认了「${c[0].name}」（近亲）`);
+      }
       // （8/14 的「无奶优先」已被上面的奶性一致律盖住：那条只在有别的选择时才排奶，8/30 就是这么漏的）
-      return c.sort((a, b) => 素(a.name) - 素(b.name) || 头(a.name) - 头(b.name) || 裸长(a.name) - 裸长(b.name) || a.name.length - b.name.length)[0] || null;
+      return c.sort((a, b) => 忌(a.name) - 忌(b.name) || 素(a.name) - 素(b.name) || 头(a.name) - 头(b.name) || 裸长(a.name) - 裸长(b.name) || a.name.length - b.name.length)[0] || null;
     };
     const 挑名 = (list) => {
       if (!DISH) return null;
@@ -1201,6 +1512,62 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     //   「买过」面板里那行同名的（带「再来一单」）又不算菜——翻整本之前先看左栏：有分类名沾着她要的词
     //   （美式→美式家族、拿铁→风味拿铁、生椰→生椰家族）就先跳过去找，人也是这么找的。
     //   见菜/见规 是累计的菜单（跳完把分类底下的都并进去）；够了(list) 说什么时候算找着。
+    // ⭐10/11 喜茶案·她的点子（「店里不都有搜索的吗，如果指名要喝什么的搜一下不可以么」）：
+    //   点了名的东西，进店先在店里那个「搜一搜」敲名字——比整本菜单滚着翻快，按的下数也少（少招验证）。
+    //   实测（喜茶超级蜂巢店）：店铺页顶上「搜一搜」→ 整页跳到 ele-index-search，输入框 input.search-input，
+    //   回车出来的结果是跟菜单一样的 .menuItem 卡（名字在 .menuItem--info-title、规格钮 .btn_select_spec），
+    //   点规格钮弹的就是同一个 sku 面板（.sku__button＝加入购物车）。回店铺页＝goBack。
+    const 店内搜 = async (词) => {
+      if (!/ele-index-search/.test(page.url())) {
+        const 有 = await page.evaluate(() => {
+          document.querySelectorAll("[data-ss]").forEach((e) => e.removeAttribute("data-ss"));
+          const t = [...document.querySelectorAll("*")].find((e) => e.children.length === 0
+            && (e.textContent || "").trim() === "搜一搜" && e.getBoundingClientRect().height > 0);
+          if (!t) return false;
+          (t.closest('[class*="search" i]') || t.parentElement || t).setAttribute("data-ss", "1");
+          return true;
+        });
+        if (!有) { 足迹.push("店里没找着「搜一搜」"); return null; }
+        await 鼠标点("[data-ss='1']", "店里的「搜一搜」");
+        try { await page.waitForURL(/ele-index-search/, { timeout: 10000 }); } catch {}
+        if (!/ele-index-search/.test(page.url())) { 足迹.push("「搜一搜」没开"); return null; }
+      }
+      await 慢(1200, 2400);
+      try {
+        const box = page.locator("input.search-input").first();
+        await box.click({ timeout: 5000 });
+        await 睡(500 + Math.floor(Math.random() * 500));
+        await box.fill("");
+        await box.pressSequentially(词, { delay: 160 + Math.floor(Math.random() * 140) });
+        await 睡(700 + Math.floor(Math.random() * 600));
+        await page.keyboard.press("Enter");
+      } catch (e) { 足迹.push(`店里搜框敲不进字（${String(e).slice(0, 40)}）`); return null; }
+      try {
+        await page.waitForFunction(() => [...document.querySelectorAll(".menuItem .menuItem--info-title")]
+          .some((e) => e.getBoundingClientRect().height > 0) || /没有找到|暂无|无结果|换个词/.test(document.body.innerText || ""),
+          null, { timeout: 12000 });
+      } catch {}
+      await 慢(1000, 2000);
+      await 查验证("店里搜");
+      const 果 = await page.evaluate(() => [...document.querySelectorAll(".menuItem")]
+        .filter((c) => c.getBoundingClientRect().height > 0)
+        .map((c, i) => {
+          const name = ((c.querySelector(".menuItem--info-title") || {}).innerText || "").split("\n")[0].trim().slice(0, 24);
+          const t = (c.innerText || "").replace(/\n+/g, " ");
+          const 价 = Number((t.match(/¥\s*(\d+(?:\.\d+)?)/) || [])[1]);
+          const 售 = Number((t.match(/月售\s*(\d+)/) || [])[1] || 0);
+          return { i: 5000 + i, name, 价, 售, 规格: true, 售罄: /售罄|已售完/.test(t), 搜: true };
+        }).filter((x) => x.name && !/盲喝|盲盒|盲选|随机|神秘|隐藏款/.test(x.name) && !x.售罄 && isFinite(x.价)));
+      足迹.push(`店里搜「${词}」→ ${果.length ? 果.map((m) => m.name).slice(0, 8).join("、") : "没结果"}`);
+      return 果;
+    };
+    const 回店堂 = async () => {
+      if (/ele-index-search/.test(page.url())) {
+        try { await page.goBack({ waitUntil: "domcontentloaded", timeout: 12000 }); } catch {}
+        await 慢(1500, 2800);
+      }
+    };
+
     const 跳分类找 = async (见菜, 见规, 够了) => {
       try {
         const 核词 = (拆口语(DISH).核 || DISH);
@@ -1243,6 +1610,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         去前(n) === 去前(d) || n === 去前(k) || 去前(n) === 去前(k);
     };
     const 本来点了名 = !!DISH;   // 8/23：短词是「试」出来的菜名，每家店进门先还原再试
+    let 店门口登回过 = false;    // 10/18：店门口掉登录只登一回
     for (let 位 = 起始位; 位 < 起始位 + 3; 位++) {
       if (!本来点了名) DISH = "";
       const 卡 = await 找店卡(位);
@@ -1260,6 +1628,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
             try { await page.waitForFunction(() => /起送¥/.test(document.body.innerText || ""), null, { timeout: 20000 }); } catch {}
             await 慢();
             await 查验证("缩词重搜");
+            await 要店卡("缩词重搜");
             位--;
             continue;
           }
@@ -1273,8 +1642,36 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       // 起送线超过她给的预算＝这家永远结不了账，别进门白折腾——门口看一眼牌子就换下一家。
       if (店.起送 > MAX) { 足迹.push(`第${位}家「${店.name}」起送¥${店.起送} 比预算¥${MAX}还高——不进，换下一家`); continue; }
       if (!DRY && (账.店[店.name] || 0) >= 1) { 足迹.push(`第${位}家「${店.name}」今天进过了，换下一家`); continue; }
-      if (!(await 进店(店))) { 足迹.push(`第${位}家「${店.name}」门没推开，换下一家`); await 回搜索(); continue; }
+      const 门 = await 进店(店);
+      if (门 === "掉门") {   // 10/18：店门口被踹到登录页——登回去、回到搜索页、同一位再敲一次；再被踹就收手（连着敲门＝风控脸）
+        if (!店门口登回过) { 店门口登回过 = true; await 保登录("店铺页", 搜索URL, 有店); 位--; continue; }
+        死("登录", "刚在店门口登回去了，再推店门又被踹回登录页——这回不再试，下回再登");
+      }
+      if (!门) { 足迹.push(`第${位}家「${店.name}」门没推开，换下一家`); await 回搜索(); continue; }
       if (!DRY && (账.店[店.name] || 0) >= 1) { 足迹.push(`「${店.name}」（进门认出真名）今天进过了，换下一家`); await 回搜索(); continue; }
+      if (门 === "生鲜") {   // 10/18：生鲜店堂——读货架、对名字，对上了就定这家；别的（店里搜/翻菜单/分类栏）都是餐馆那套，不走
+        生鲜 = true;
+        生鲜车前 = (await 生鲜底栏()).额;
+        菜 = await 生鲜读架(); 规格菜 = [];
+        for (let 拱 = 0; 拱 < 2 && 菜.length < 12; 拱++) {   // 货架懒加载：拿最后一张卡拱一屏再读，并进来
+          await page.evaluate(() => { const c = document.querySelectorAll("[data-g]"); const e = c[c.length - 1]; if (e) e.scrollIntoView({ block: "end" }); });
+          await 慢(1500, 2500);
+          const 再 = await 生鲜读架(); const 名 = new Set(菜.map((m) => m.name));
+          再.forEach((m) => { if (!名.has(m.name)) 菜.push(m); });
+        }
+        if (A.菜单) out({ ok: true, 抄菜单: true, 生鲜: true, shop: 店.name, 菜: 菜.map((m) => `${m.name} ¥${m.价}`), 足迹 });
+        足迹.push(`「${店.name}」是生鲜店堂，货架读到 ${菜.length} 样（进门时底栏 ¥${生鲜车前}）：${菜.slice(0, 8).map((m) => m.name.slice(0, 16)).join("、")}`);
+        if (!本来点了名 && 短词) { DISH = 短词; 足迹.push(`「${短词}」先当货名到「${店.name}」货架上对一遍`); }
+        if (DISH && !挑名(菜)) {
+          if (!本来点了名) {
+            if (!菜.some(兜底筛)) { 足迹.push(`第${位}家「${店.name}」货架上没对上「${DISH}」，也没一样像她要的（忌口筛过），换下一家`); await 回搜索(); continue; }
+            足迹.push(`第${位}家「${店.name}」货架上没对上「${DISH}」——当品类词，挑这家卖得多的`);
+            DISH = "";
+          } else { 足迹.push(`第${位}家「${店.name}」货架上没见着「${DISH}」，换下一家`); await 回搜索(); continue; }
+        } else if (DISH) 足迹.push(`第${位}家「${店.name}」货架上对上了「${(挑名(菜) || {}).name}」`);
+        定了 = true;
+        break;
+      }
 
       // 抄菜单模式（8/14）：只抄不买、一分不花——抄的是第一家能进的店
       if (A.菜单) {
@@ -1287,6 +1684,21 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         out({ ok: true, 抄菜单: true, shop: 店.name, 菜: [...见过.values()], 足迹 });
       }
 
+      // ⭐10/11 她的点子：点了名的，先在店里「搜一搜」——搜着了就不翻菜单；搜不着才退回老路翻
+      if (DISH && 本来点了名 && !A.不店搜) {
+        const 果 = await 店内搜(拆口语(DISH).核 || DISH);   // 「冰咸酪碎银子」敲进去的是「咸酪碎银子」，冰交给规格面板
+        const h = 果 && 果.length ? 挑名(果) : null;
+        await 回店堂();
+        if (h) {
+          ({ 菜, 规格菜 } = await 读菜());      // 眼前那几样留着给凑起送挑
+          规格菜 = [h, ...规格菜.filter((m) => m.name !== h.name)];
+          菜 = 菜.filter((m) => m.name !== h.name);
+          足迹.push(`第${位}家「${店.name}」店里搜着了「${h.name}」¥${h.价}`);
+          定了 = true;
+          break;
+        }
+        足迹.push(`第${位}家「${店.name}」店里没搜着「${DISH}」，退回翻菜单`);
+      }
       ({ 菜, 规格菜 } = await 读菜());
       // ⭐8/23 冰美式案：短词先当菜名到这家菜单里对一遍——对上了就是她要的；翻完对不上才当品类词挑月售王
       if (!本来点了名 && 短词) { DISH = 短词; 足迹.push(`「${短词}」不够四个字，先当菜名到「${店.name}」菜单里对一遍`); }
@@ -1332,6 +1744,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         await 查验证("翻菜单");
         if (!中) {
           if (!本来点了名) {
+            if (![...菜, ...规格菜].some(兜底筛)) {   // 10/17：热可可端成肉桂卷那课——这家没一样像她要的这路（喝的/忌口筛过），别将就，换下一家
+              足迹.push(`第${位}家「${店.name}」整本翻完（${菜.length + 规格菜.length} 样）没对上「${DISH}」，也没一样像她要的这路（喝的/忌口筛过），换下一家`);
+              await 回搜索();
+              continue;
+            }
             足迹.push(`第${位}家「${店.name}」整本翻完（${菜.length + 规格菜.length} 样）没对上「${DISH}」——当品类词，挑这家月售高的（见着的：${[...菜, ...规格菜].slice(0, 30).map((m) => m.name).join("、")}）`);
             DISH = "";
           } else {
@@ -1346,7 +1763,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       定了 = true;
       break;
     }
-    if (!定了) 死("挑菜", DISH ? `连着看了几家都没见着「${DISH}」——要不换个说法，要不我随便挑` : "一家能进的店都没有", { 足迹 });
+    if (!定了) 死("挑菜", DISH ? `连着看了几家都没见着「${DISH}」——要不换个说法，要不我随便挑` : (新零售店 >= 2 ? "连着进了几家生鲜店堂，货架上没一样像她要的" : "一家能进的店都没有"), { 足迹 });
 
     // ⭐8/14 十二诊（她要大杯，我端上来中杯大杯各一）：8/13 六诊说「除非真缺选，一个规格都别动」
     //   ——那条拦的是「乱点」，不是「她点了名的」。她说大杯就得挑大杯：只点她点名的那几个词，
@@ -1379,6 +1796,36 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     };
 
     const 加规格菜 = async (m, 份 = 1) => {
+      // ⭐10/11：店里搜出来的那样，店铺页上多半没有它那张卡（没翻菜单）——回搜索框再搜一遍，点它自己的规格钮
+      let 搜开了 = false;
+      if (m.搜) {
+        const 果 = await 店内搜(m.name);
+        if (果 && 果.length) {
+          const 有 = await page.evaluate((name) => {
+            document.querySelectorAll("[data-spec]").forEach((e) => e.removeAttribute("data-spec"));
+            const cards = [...document.querySelectorAll(".menuItem")].filter((c) => c.getBoundingClientRect().height > 0);
+            const c = cards.find((c) => ((c.querySelector(".menuItem--info-title") || {}).innerText || "").split("\n")[0].trim() === name);
+            if (!c) return false;
+            c.scrollIntoView({ block: "center" });
+            const b = c.querySelector(".btn_select_spec") || c.querySelector(".btn__plus") || c.querySelector("[class*='plus']");
+            (b || c).setAttribute("data-spec", "1");
+            return true;
+          }, m.name);
+          if (有) {
+            await 睡(900 + Math.floor(Math.random() * 700));
+            await 鼠标点('[data-spec="1"]', `店里搜出来的「${m.name}」的规格钮`);
+            try { await page.waitForFunction(() => !!document.querySelector(".sku__button"), null, { timeout: 10000 }); } catch {}
+            await 慢(1000, 2000);
+            await 查验证("店里搜·规格面板");
+            搜开了 = !!(await page.$(".sku__button"));
+            足迹.push(`店里搜着点开「${m.name}」→${搜开了 ? "规格面板开了" : "没开"}`);
+          }
+        }
+        if (!搜开了) await 回店堂();
+      }
+      let 详 = "", 开了 = false;
+      if (搜开了) { 详 = await 文(); 开了 = true; }
+      if (!搜开了) {
       // ⚠️8/14：往下翻过菜单之后卡片索引会漂（懒加载又插进来好几屏）——认名字优先、索引兜底；
       //   而且目标多半已经不在视口里了，先滚到眼前再点，不然真鼠标打的是空坐标。
       await page.evaluate(({ idx, name }) => {
@@ -1387,18 +1834,63 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         //   那个类在这种店里穿在「买过/刚刚搜过」面板的旧账身上，按名字一撞就咬到旧账，
         //   点下去＝快捷加购不带规格＝「以下商品无法购买·未选必选品」。
         //   真卡的标题元素＝.food-name（买过面板没有它），先精确对名认它，认不着再走老路。
-        const fns = [...document.querySelectorAll(".food-name")];
+        // ⭐10/11 喜茶案（她问指名道姓的奶茶为什么不能搜）：喜茶店里正好反过来——.food-name 穿在「买过」面板身上，
+        //   真菜卡的名字是 .mor-comp-text。点了面板里那行＝详情页永远不开。所以先把买过面板里的一律剔掉，再认名字。
+        const 在买过 = (e) => { let p = e; for (let k = 0; k < 7 && p; k++) {
+          const c = (p.className || "").toString();
+          if (/one-more|bought|recent|history|buy-again|rebuy/i.test(c)) return true;
+          const r = p.getBoundingClientRect();
+          if (r.height < 600 && /再来一单|再买一单|买过|刚刚搜过/.test(p.innerText || "")) return true;
+          p = p.parentElement; } return false; };
+        const fns = [...document.querySelectorAll(".food-name")].filter((e) => !在买过(e));
+        const mor = [...document.querySelectorAll(".mor-comp-text")].filter((e) => !在买过(e));
         const fn = fns.find((e) => (e.innerText || "").trim() === name)
+                || mor.find((e) => (e.innerText || "").trim() === name)
                 || fns.find((e) => (e.innerText || "").includes(name));
-        const cards = [...document.querySelectorAll(".menuItem--info")];
+        const cards = [...document.querySelectorAll(".menuItem--info")].filter((e) => !在买过(e));
         const el = fn
                 || cards.find((e) => (e.innerText || "").split("\n")[0].trim() === name)
                 || cards.find((e) => (e.innerText || "").includes(name)) || cards[idx];
         if (el) { el.setAttribute("data-spec", "1"); el.scrollIntoView({ block: "center" }); }
       }, { idx: m.i, name: m.name });
       await 睡(1300 + Math.floor(Math.random() * 900));
+      // ⭐10/17 晚·鸡柳大人案（19:13 那趟在第二家点了卡名→「+ 加入购物车」整颗被压着硬点→面板没开→空手）：
+      //   卡上有「选规格」小钮的先按它——规格面板直接在店铺页弹出来（.sku__button 当场就有，今晚我手动一锤即中，
+      //   8/16 螺蛳粉那回终局也是它）；没这颗钮、或按了没见面板，才走下面的老门铃（卡名→卡图→选规格）。
+      let 规钮先开 = false;
+      try {
+        const 规钮 = await page.evaluate(() => {
+          const el = document.querySelector('[data-spec="1"]'); if (!el) return null;
+          let b = null;
+          for (let p = el, k = 0; !b && p && k < 8; k++, p = p.parentElement) {
+            const hit = [...p.querySelectorAll("div,span,button")].filter((e) => (e.textContent || "").trim() === "选规格");
+            if (hit.length === 1) b = hit[0]; else if (hit.length > 1) break;
+          }
+          if (!b) return null;
+          b.scrollIntoView({ block: "center" });
+          const r = b.getBoundingClientRect();
+          const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          const 露 = !!(top && (top === b || b.contains(top) || top.contains(b)));
+          return (r.width > 8 && r.height > 8 && 露) ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+        });
+        if (规钮) {
+          await 睡(500 + Math.floor(Math.random() * 500));
+          await page.mouse.move(规钮.x - 20, 规钮.y - 15, { steps: 5 });
+          await 睡(280 + Math.floor(Math.random() * 220));
+          await page.mouse.click(规钮.x, 规钮.y);
+          try { await page.waitForFunction(() => !!document.querySelector(".sku__button"), null, { timeout: 10000 }); } catch {}
+          await 慢(1000, 1800);
+          await 查验证("规格面板");
+          if (await page.$(".sku__button")) { 规钮先开 = true; 详 = await 文(); 开了 = true; 足迹.push(`「${m.name}」卡上有「选规格」小钮，先按它→规格面板开了`); }
+          else 足迹.push(`按了「${m.name}」卡上的「选规格」没见面板，走老门铃`);
+        }
+      } catch (e) { 足迹.push("选规格先手出错：" + String(e.message).slice(0, 40)); }
+      if (!规钮先开) {
       if (!(await 鼠标点('[data-spec="1"]', `「${m.name}」卡片`))) {
-        await page.locator('[data-spec="1"]').first().click();
+        // ⭐9/17 皮蛋瘦肉粥案（她饿着等蛋、家里那只手在这儿炸了）：locator.click 对 Tiga 活 div 会等 15s 抛
+        //   TimeoutError 把整趟掀翻——它只是三重门铃前的一脚，点不动就记一笔，交给下面卡图/「选规格」后手。
+        try { await page.locator('[data-spec="1"]').first().click({ timeout: 4000 }); }
+        catch (e) { 足迹.push(`「${m.name}」卡片 locator 也点不动（${String(e).slice(0, 40)}）——走卡图/选规格后手`); }
       }
       // 详情页也是 Tiga 渲染，骨架先到——等那颗真按钮出现，别按秒数猜（8/13 七诊：慢 3 秒还是没开）
       try {
@@ -1408,9 +1900,10 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       } catch {}
       await 慢(1200, 2200);
       await 查验证("商品详情页");
-      let 详 = await 文();
-      let 开了 = /加入购物车/.test(详);
+      详 = await 文();
+      开了 = /加入购物车/.test(详);
       足迹.push(`点开「${m.name}」→${开了 ? "商品详情页开了" : "没开"}`);
+      }   // ← 10/17：选规格先手开了面板，就不走卡名那条路
       if (!开了) {
         // ⚠️8/15 和合谷案：有的店卡标题不认手、图才认——补一脚点卡图再等一回
         const 图 = await page.evaluate(() => {
@@ -1443,8 +1936,14 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
             const el = document.querySelector('[data-spec="1"]');
             const card = el && (el.closest(".menuItem--info") || el.closest('[class*="menuItem"]') || (el.parentElement && el.parentElement.parentElement));
             const scope = card || document;
-            const b = [...scope.querySelectorAll("div,span,button")].find((e) => (e.textContent || "").trim() === "选规格")
+            let b = [...scope.querySelectorAll("div,span,button")].find((e) => (e.textContent || "").trim() === "选规格")
                    || scope.querySelector(".btn__plus,[class*='plus']");
+            // 10/11 喜茶：真卡名字（.mor-comp-text）离「选规格」隔着好几层，往上一层层找，找到这张卡自己那颗为止
+            for (let p = el, k = 0; !b && p && k < 8; k++, p = p.parentElement) {
+              const hit = [...p.querySelectorAll("div,span,button")].filter((e) => (e.textContent || "").trim() === "选规格");
+              if (hit.length === 1) b = hit[0];
+              else if (hit.length > 1) break;
+            }
             if (!b) return null;
             const r = b.getBoundingClientRect();
             return (r.width > 8 && r.height > 8) ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
@@ -1465,8 +1964,20 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
             足迹.push(`三试 →${开了 ? "开了" : "还是没开"}`);
           }
         }
+        if (!开了) {
+          // ⭐10/6 一点点案：她刚划完验证那一趟，详情页慢了半拍才到——屏上明明开了，手已经撤了。撤之前再多等一回
+          try {
+            await page.waitForFunction(
+              () => !!document.querySelector(".sku__button") || /加入购物车/.test(document.body.innerText || ""),
+              null, { timeout: 20000 });
+          } catch {}
+          详 = await 文();
+          开了 = /加入购物车/.test(详) || !!(await page.$(".sku__button"));
+          if (开了) 足迹.push(`「${m.name}」的详情页慢了半拍才到，接着走`);
+        }
         if (!开了) { 足迹.push(`「${m.name}」的详情页怎么都打不开，这样没加上`); return false; }
       }
+      }   // ← 10/11：没走店里搜那条路的老门铃到这儿收
       // ⭐8/13 六诊（这一版之前我栽得最惨的一处）：**规格默认就是选好的**
       //   （详情页顶上那行「已选：超大杯/冰/意式拼配/普通吸管/无奶/不另外加糖/默认浓度」），
       //   压根不需要挑。我上一版拿通用选择器「每组点头一个」，在详情页上乱点了 17 下、
@@ -1516,7 +2027,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       await 鼠标点(".sku__button", "sku 面板的下单钮");
       await 慢(1800, 3000);
       // ⚠️加完必须**退回店铺页**再看车——详情页底下从来没有「去结算」，在这儿找＝自己骗自己（我栽过一次）
-      if (/ele-product-detail/.test(page.url())) {
+      if (/ele-product-detail|ele-index-search/.test(page.url())) {   // 10/11：店里搜的那页也得退回店铺页
         try { await page.goBack({ waitUntil: "domcontentloaded", timeout: 12000 }); } catch {}
         await 慢(1500, 2800);
       }
@@ -1579,34 +2090,51 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       // 点名的菜一样菜不够起送线＝结算钮永远不出生。差多少就从菜单里挑便宜小菜凑：
       // 小菜/蛋/青菜/饮料这类优先、按价从低到高，至多补 3 样、原价总账不越预算太远（同贪心路口径）。
       {
-        const 主价 = (hit ? hit.价 : (hit2 ? hit2.价 : 0)) || 0;
+        // ⭐9/17 皮蛋瘦肉粥案：她要两碗（qty=2）、这儿却按一碗算缺口＝抢在主菜前往车里塞了四样凑头（还俩酸奶）。
+        //   主价要乘份数；凑头还要过她的忌口：粘糯的、奶的、辣条一族不拿来凑。
+        const 主价 = ((hit ? hit.价 : (hit2 ? hit2.价 : 0)) || 0) * QTY;
+        // 10/11 红枣桂圆茶案：「窝蛋双皮奶」溜过了这把筛子（只认牛奶/酸奶/奶皮）——注释说的是「奶的不拿来凑」，就认「奶」字
+        const 忌口 = /奶|乳|麻薯|珍珠|芋圆|小圆子|西米|年糕|汤圆|粽|糯|辣条|麻辣/;
         if (店.起送 > 0 && 主价 > 0 && 主价 < 店.起送) {
           const 差 = 店.起送 - 主价;
-          const 配 = [...菜].filter((m) => m !== hit && m.价 > 0)
+          const 配 = [...菜].filter((m) => m !== hit && m.价 > 0 && !忌口.test(m.name || ""))
             .sort((a, b) => {
               const sa = /小菜|青菜|生菜|油麦|腐竹|木耳|花生|蛋|豆|鸭|饮|可乐|王老吉|酸奶|凉菜/.test(a.name) ? 0 : 1;
               const sb = /小菜|青菜|生菜|油麦|腐竹|木耳|花生|蛋|豆|鸭|饮|可乐|王老吉|酸奶|凉菜/.test(b.name) ? 0 : 1;
               return sa - sb || a.价 - b.价;
             });
           let 补 = 0;
-          for (const m of 配) {
-            if (选.length >= 4 || 补 >= 差) break;
-            if (主价 + 补 + m.价 > MAX * 1.9) continue;
-            if (m.价 > 差 - 补 + 12) continue;   // 8/23 那家店：差¥5 去拿¥33 的特惠套餐凑，荒唐——不够的交给加购后看底栏那一手
-            选.push(m); 补 += m.价;
-            足迹.push(`凑起送：加「${m.name}」¥${m.价}（还差 ¥${Math.max(0, 差 - 补).toFixed(1)}）`);
+          // ⭐10/11 红枣桂圆茶案：差几块钱起送，旧法先按「小菜/蛋/饮」排、再看价——「窝蛋双皮奶」带个蛋字就排头，¥17 塞进去，
+          //   结算页 ¥37 撞她 ¥30 的线，一分没花白跑一趟。现在先在她的线里挑：一样就够数的挑最便宜那样；
+          //   一样不够才按老法一样样凑（先守她的线，凑不满再放到老口径 1.9 倍——原价常比到手价高，交给结算页那道闸判）。
+          const 线 = Math.max(主价, MAX - 3);   // 留三块给打包费/配送费（结算页的合计带着它们）
+          const 一样 = 配.filter((m) => m.价 >= 差 && 主价 + m.价 <= 线)
+            .sort((a, b) => a.价 - b.价)[0];
+          if (一样) {
+            选.push(一样); 补 = 一样.价;
+            足迹.push(`凑起送：加「${一样.name}」¥${一样.价}（一样就够·在她 ¥${MAX} 的线里留了打包配送挑的最便宜）`);
+          }
+          for (const 顶 of [线, MAX * 1.9]) {
+            for (const m of 配) {
+              if (选.length >= 4 || 补 >= 差) break;
+              if (选.includes(m)) continue;
+              if (主价 + 补 + m.价 > 顶) continue;
+              if (m.价 > 差 - 补 + 12) continue;   // 8/23 那家店：差¥5 去拿¥33 的特惠套餐凑，荒唐——不够的交给加购后看底栏那一手
+              选.push(m); 补 += m.价;
+              足迹.push(`凑起送：加「${m.name}」¥${m.价}（还差 ¥${Math.max(0, 差 - 补).toFixed(1)}）`);
+            }
           }
           if (补 < 差) 足迹.push(`凑起送：小菜凑不满（差 ¥${(差 - 补).toFixed(1)}），先试着结——结不了她会看见账`);
         }
       }
     } else if (!菜.length) {
       // 整店都要选规格（咖啡奶茶）——挑月售最高的一杯
-      规格选 = [[...规格菜].sort((a, b) => b.售 - a.售 || a.价 - b.价)[0]];
+      规格选 = [[...规格菜].filter(兜底筛).sort((a, b) => b.售 - a.售 || a.价 - b.价)[0]].filter(Boolean);   // 10/17：过兜底筛
     } else {
       // 贪心：月售高的优先，凑到起送线（起送按原价算），别超预算的八成
       // （8/15 曾在这儿绕开过「套餐」，她当场平反：「套餐不用选规格，一点就进车」——拦人的
       //   其实是店规必选小件，那针补在加购后的分诊里；套餐照点不误。）
-      const 排 = [...菜].sort((a, b) => b.售 - a.售 || a.价 - b.价);
+      const 排 = [...菜].filter(兜底筛).sort((a, b) => b.售 - a.售 || a.价 - b.价);   // 10/17：过兜底筛（忌口不兜底·要喝的不端吃的）
       let 和 = 0;
       for (const m of 排) {
         if (选.length >= 3) break;
@@ -1621,11 +2149,13 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     // 别在错的底子上加对的东西——那样只会付出去一笔她没点的钱。
     // ⭐8/23：底栏那一行钱是车里有没有货的唯一实证（面板/对话框的字会躲进影子里，钱躲不了）
     const 读底栏额 = async () => {
+      if (生鲜) return (await 生鲜底栏()).额;   // 10/18：生鲜店堂的底栏另一副样子
       const t = await 文();
       const m = t.slice(-320).match(/¥\s*(\d+(?:\.\d+)?)\s*\n?\s*(?:预估券后价|免配送费|另需配送费|配送费|共优惠)/);
       return m ? Number(m[1]) : NaN;
     };
     const 清车 = async () => {
+      if (生鲜) return 生鲜清车();   // 10/18：生鲜店堂走抽屉里的「清空」→「确定」
       const 有 = await page.evaluate(() => {
         document.querySelectorAll("[data-cart]").forEach((e) => e.removeAttribute("data-cart"));
         const H = innerHeight;
@@ -1706,6 +2236,14 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     let 主菜没加上 = "";  // 8/23：她点名的那样没进车就不许去结算
     // 8/14：东西已经在车里了（上一趟卡在结算页读空），这趟只管结账，别再往车里堆
     if (A.跳加购) 足迹.push("跳过加购：车里本来就有");
+    else if (生鲜) {   // 10/18：生鲜店堂——卡上那颗「+」直接进车，不开详情页、没有 sku 面板（百果园实测）
+      for (const m of 选) {
+        const 成 = await 生鲜加购(m, 份);
+        if (!成) 生鲜没进车 = (生鲜没进车 ? 生鲜没进车 + "、" : "") + m.name;
+      }
+      const b0 = await 生鲜底栏();
+      if (!(b0.额 > 0)) 生鲜没进车 = 生鲜没进车 || 选.map((m) => m.name).join("、");
+    }
     else {
       for (const m of 选) {
         for (let k = 0; k < 份; k++) {
@@ -1840,6 +2378,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     //   原样留在车里，下一单的账更对不上，越滚越脏。可整车清空又会误删她自己存的东西——
     //   正法＝**我自己加的我自己撤**：回店堂，对我碰过的每样点减号点到那颗钮自己消失。
     const 撤货 = async () => {
+      if (生鲜) return 生鲜撤货();   // 10/18：生鲜店堂的车在抽屉里
       const 我加的 = [...选, ...规格选].filter(Boolean);
       if (!我加的.length) return false;
       try {
@@ -1929,6 +2468,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       } catch {}
       return 净;
     };
+    if (生鲜没进车) { await 撤货(); 死("加购", `生鲜店堂：「${生鲜没进车}」按了「+」没进车（步进器/底栏没动），我加的已撤回，没去结算`, { 足迹 }); }
     if (主菜没加上) { await 撤货(); 死("加购", `她点名的「${主菜没加上}」没加进车（详情页打不开），别的我也撤了，没去结算`); }
     let 车 = await 文();
     // ⭐8/23 冰美式案：瑞幸的起送线按到手价算（标价¥13的美式到手¥9.9，起送¥20），东西明明进了车，
@@ -1942,8 +2482,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       for (let 轮 = 0; 轮 < 2; 轮++) {
         const 差 = 读差(车);
         if (差 <= 0) break;
-        const 候 = [...菜, ...规格菜].filter((m) => m.name && m.价 > 0 && !已加.has(m.name) && 花 + m.价 <= MAX * 1.9);
-        const 够 = 候.filter((m) => m.价 >= 差).sort((a, b) => a.价 - b.价)[0];
+        // 10/11：这一手从前不过忌口——粘糯的、奶的、辣条一族照样会被拿来凑；够数的先在她的线里（留三块打包配送）挑
+        const 候 = [...菜, ...规格菜].filter((m) => m.name && m.价 > 0 && !已加.has(m.name) && 花 + m.价 <= MAX * 1.9
+          && !/奶|乳|麻薯|珍珠|芋圆|小圆子|西米|年糕|汤圆|粽|糯|辣条|麻辣/.test(m.name));
+        const 够 = 候.filter((m) => m.价 >= 差 && 花 + m.价 <= MAX - 3).sort((a, b) => a.价 - b.价)[0]
+          || 候.filter((m) => m.价 >= 差).sort((a, b) => a.价 - b.价)[0];
         const m = 够 || 候.sort((a, b) => b.价 - a.价)[0];
         if (!m) { 足迹.push(`凑起送：底栏说还差 ¥${差}，菜单里挑不出合适的凑头`); break; }
         足迹.push(`凑起送：底栏说还差 ¥${差}，加「${m.name}」¥${m.价} 凑上去`);
@@ -1954,6 +2497,26 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         await 查验证("凑起送");
         车 = await 文();
       }
+    }
+    if (生鲜 && !A.跳加购) {   // 10/18：生鲜店堂的底栏写「差¥X起送」就从货架挑一样便宜的凑（最多两轮·过忌口）
+      const 已加 = new Set([...选, ...规格选].filter(Boolean).map((m) => m.name));
+      let 花 = [...选, ...规格选].filter(Boolean).reduce((a, m) => a + (m.价 || 0), 0);
+      for (let 轮 = 0; 轮 < 2; 轮++) {
+        const b = await 生鲜底栏();
+        const 差 = b.差 > 0 ? b.差 : ((b.起送 > 0 && b.额 >= 0 && b.额 < b.起送) ? b.起送 - b.额 : 0);
+        if (!(差 > 0)) break;
+        const 候 = 菜.filter((m) => m.name && m.价 > 0 && !已加.has(m.name) && 兜底筛(m) && 花 + m.价 <= MAX * 1.9);
+        const m = 候.filter((x) => x.价 >= 差 && 花 + x.价 <= MAX - 3).sort((a, c) => a.价 - c.价)[0]
+               || 候.filter((x) => x.价 >= 差).sort((a, c) => a.价 - c.价)[0]
+               || 候.sort((a, c) => c.价 - a.价)[0];
+        if (!m) { 足迹.push(`凑起送：底栏说还差 ¥${差}，货架上挑不出合适的凑头`); break; }
+        足迹.push(`凑起送：底栏说还差 ¥${差}，加「${m.name}」¥${m.价} 凑上去`);
+        已加.add(m.name); 花 += m.价; 选.push(m);
+        await 生鲜加购(m, 1);
+        await 慢(1500, 2800);
+        await 查验证("生鲜凑起送");
+      }
+      车 = await 文();
     }
     if (!结按钮.test(车)) {
       await 撤货();   // 8/23：万一进了车只是钮的字我不认得，收场前把自己加的撤回去，别坑下一单
@@ -1969,7 +2532,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const t = (e.innerText || "").trim();
         if (!/^(去结算|选好了|结算|去下单|立即下单)/.test(t) || t.length > 12) return false;
         const r = e.getBoundingClientRect();
-        return r.width > 40 && r.height > 20 && r.y > H * 0.7;
+        return r.width > 40 && r.height > 14 && r.y > H * 0.7;   // 10/18：生鲜店堂那颗「去结算」叶子只有 16px 高，20 把它筛没了（退回 force 兜底才按着）
       });
       const t = c[c.length - 1];
       if (t) t.setAttribute("data-settle", "1");
@@ -1986,7 +2549,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         null, { timeout: 20000 });
     } catch {}
     await 慢(1500, 3000);
-    let 结文 = await 文();
+    let 结文 = 齐价(await 文());   // 10/18：生鲜结算页把 26.8 拆成「¥ / 26 / .8」三行，先拼回去
     if (/起送/.test(结文) && /还差/.test(结文)) {
       await 撤货();   // 8/18：凑不够起送就收摊，别把菜留在车里坑下一单
       死("结算", "没够起送价（我加的已撤回）", { 摘: 结文.slice(0, 120), 足迹 });
@@ -1995,14 +2558,14 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     // 地址若还挂着「请确认」，必须先点「使用」——不点的话「立即支付」按了没反应（8/13 实测）
     if (/请选择收货地址|请确认/.test(结文)) {
       try { await page.getByText("使用", { exact: true }).first().click({ timeout: 4000 }); await 慢(2000, 3500); } catch {}
-      结文 = await 文();
+      结文 = 齐价(await 文());
     }
 
     // ⚠️购物车是账号级的，可能躺着**别的时候加的旧货**（8/13 我调试时就在车里留了两件）——
     //   结算页按「× N」数一遍，比我这一趟加的还多就停手，别替她买上不知情的东西。
     // ⚠️只在「商品明细」那一段数（8/13 十一诊：底部推销的「60元超级吃货卡 ×12张」被我数成了商品）
     const 明细 = 结文.slice(0, (结文.indexOf("打包费") + 1) || 结文.length);
-    const 车件 = (明细.match(/×\s*\d+/g) || []).length;
+    const 车件 = (明细.match(/[×x]\s*\d+/g) || []).length;   // 10/18：生鲜结算页写的是小写「x1」
     // 8/15 晚：必选小件（餐具那类）是它自己补的，账房先生得数上——不然这类店永远「账对不上」
     const 该有 = [...选, ...规格选].filter(Boolean).length + (小件加了 || 0);
     if (车件 > 该有) {
@@ -2017,7 +2580,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     }
     // 份数核对（8/14 她点两杯：一杯不起送）——车里只有一杯就是第二杯没加上，别蒙混着付掉
     if (份 > 1) {
-      const 份数 = Math.max(0, ...(明细.match(/×\s*(\d+)/g) || []).map((s) => Number(s.replace(/\D/g, ""))));
+      const 份数 = Math.max(0, ...(明细.match(/[×x]\s*(\d+)/g) || []).map((s) => Number(s.replace(/\D/g, ""))));
       if (份数 !== 份) {
         await 撤货();
         死("份数", `她要 ${份} 杯，结算页是 ${份数} 杯——没敢就这么付（我加的已撤回）`,
@@ -2031,7 +2594,8 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       (结文.match(/合计¥\s*(\d+(?:\.\d+)?)/) || [])[1] ??
       (尾.match(/已优惠\s*¥\s*[\d.]+[\s\S]{0,12}?¥\s*(\d+(?:\.\d+)?)/) || [])[1] ??
       (尾.match(/¥\s*(\d+(?:\.\d+)?)/) || [])[1]);
-    const eta = (结文.match(/预计\s*(\d{1,2}:\d{2}-\d{1,2}:\d{2})\s*送达/) || [])[1] || "";
+    const eta = (结文.match(/预计\s*(\d{1,2}:\d{2}-\d{1,2}:\d{2})\s*送达/) || [])[1]
+      || ((结文.match(/约\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*送达/) || []).slice(1, 3).join("-")) || "";   // 10/18：生鲜结算页写「约17:24 - 17:39送达」
     const 全选 = [...选, ...规格选].filter(Boolean);
     const 单子 = { shop: 店.name, items: 全选.map((m) => m.name), amount: 合计, eta };
     if (!isFinite(合计)) { await 撤货(); 死("结算", "读不出合计金额，没敢往下走（我加的已撤回）", { ...单子, 结算页: 结文.slice(0, 420) }); }
@@ -2064,7 +2628,9 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       if (e) { e.setAttribute("data-pay-go", "1"); e.scrollIntoView({ block: "center" }); }
     });
     if (!(await 鼠标点('[data-pay-go="1"]', "结算页提交钮"))) {
-      try { await page.locator(".submit-btn__button").first().click({ timeout: 8000 }); } catch (e) { 足迹.push("提交钮兜底也没按动：" + String(e.message).slice(0, 60)); }
+      if (!(await 点字("提交订单", "「提交订单」（生鲜结算页/换皮兜底）", 0.7))) {   // 10/18：生鲜店堂的结算页没有 .submit-btn__button，底栏那颗写着「提交订单」
+        try { await page.locator(".submit-btn__button").first().click({ timeout: 8000 }); } catch (e) { 足迹.push("提交钮兜底也没按动：" + String(e.message).slice(0, 60)); }
+      }
     }
     await 慢(3500, 5500);
     await 查验证("收银台");
