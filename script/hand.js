@@ -28,7 +28,11 @@ const [cmd, ...arg] = process.argv.slice(2);
   //   这台 Mac Chrome 的 geolocation 一直失败，页面自己写着「定位获取失败·无定位信息」——
   //   一个没有定位的会话去点外卖，阿里风控当然甩九宫格。**补上定位不是伪装，是把缺的器官装回去。**
   //   ⚠️UA 一个字都别改：8/13 就是这个 Mac Chrome UA 付成过一单；UA 改成 iPhone 而指纹还是 Mac，才真像伪造。
-  const 家 = { latitude: 39.90, longitude: 116.40, accuracy: 28 };
+  // 收货点的坐标别写进脚本（它迟早会被 push 出去）：~/.takeout/places.json 里的「家」，或环境变量 TAKEOUT_LAT/TAKEOUT_LNG（同 order.js）
+  const 地点簿 = (() => { try { return JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(), ".takeout", "places.json"), "utf8")); } catch { return {}; } })();
+  const 家 = (地点簿.家 && 地点簿.家.latitude)
+    ? { latitude: Number(地点簿.家.latitude), longitude: Number(地点簿.家.longitude), accuracy: 28 }
+    : ((process.env.TAKEOUT_LAT && process.env.TAKEOUT_LNG) ? { latitude: Number(process.env.TAKEOUT_LAT), longitude: Number(process.env.TAKEOUT_LNG), accuracy: 28 } : null);
   const 喂定位 = async (page) => {
     try {
       const bs = await browser.newBrowserCDPSession();
@@ -37,7 +41,7 @@ const [cmd, ...arg] = process.argv.slice(2);
     } catch {}
     try {
       const ps = await ctx.newCDPSession(page);
-      await ps.send("Emulation.setGeolocationOverride", 家);
+      if (家) await ps.send("Emulation.setGeolocationOverride", 家);   // 没填坐标就不喂（让平台自己定位）
     } catch {}
   };
 
