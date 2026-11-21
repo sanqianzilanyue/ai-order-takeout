@@ -3,3 +3,6 @@ node_modules/
 外卖账.json
 *.bak
 *.log
+留底/
+收工.log
+支付宝掐过.json

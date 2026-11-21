@@ -14,6 +14,7 @@
 //   node hand.js 窄                 把窗口掐成手机宽 430x920
 //   node hand.js 宽                 还原成 1280x900
 //   node hand.js 眼                 只查人机验证/登录态
+//   node hand.js 收                 收工：那间 Chrome里的页全关掉，一页不留（11/5 她的法·手动接力收尾必敲）
 const { chromium } = require("playwright-core");
 const CDP = "http://127.0.0.1:9222";
 const 验证词 = /请选择符合描述|安全验证|滑动验证|拖动滑块|人机验证|captcha|验证码|亲，请验证|向右滑动/i;
@@ -58,7 +59,12 @@ const [cmd, ...arg] = process.argv.slice(2);
   let page = pages.slice().reverse().find((p) => /ele\.me|taobao|tmall|alipay/.test(p.url()))
           || pages.slice().reverse().find((p) => p.url() && p.url() !== "about:blank")
           || pages[0];
-  if (!page || page.isClosed()) page = await ctx.newPage();
+  if (cmd === "收") {   // 11/5 她的法：干完活关掉网页别留着——手动接力收尾就敲这一句（那间 Chrome里的页全关，一页不留）
+    await browser.close();
+    try { console.log(require("child_process").execFileSync(process.execPath, [require("path").join(__dirname, "knock_off.js"), "--藏"], { encoding: "utf8" }).trim()); } catch (e) { console.log("收工没成 " + String(e.message).slice(0, 120)); }
+    return;
+  }
+  if (!page || page.isClosed()) page = await require("./offscreen_page.js").屏外开页(browser, ctx);   // 11/5：屋里没窗就把新窗开在屏外
   page.setDefaultTimeout(20000);
   await 喂定位(page);   // ⚠️CDP 覆盖是 session 级的，每条命令连上来都得重喂一遍
 
@@ -158,6 +164,11 @@ const [cmd, ...arg] = process.argv.slice(2);
       if (ifr.length) console.log("iframe：" + JSON.stringify(ifr));
       console.log("---");
       console.log(t.slice(0, 400));
+    }
+    else if (cmd === "算") {   // 11/5 梅子酒案：在页里跑一段 JS（文件里放一个表达式/IIFE），结果打出来——看货架 DOM 用
+      const src = require("fs").readFileSync(arg[0], "utf8");
+      const r = await page.evaluate(src);
+      console.log(typeof r === "string" ? r : JSON.stringify(r, null, 1));
     }
     else console.log("不认得这条命令");
   } catch (e) {

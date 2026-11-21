@@ -25,7 +25,9 @@ const path = require("path");
 const crypto = require("crypto");
 
 const A = JSON.parse(process.argv[2] || "{}");
-const KW = A.kw || "";
+// ⭐10/29 早·冰美式案：上游填了 dish「冰美式」＋店含「瑞幸」却没填 kw/shop，脚本第一句就按「入参」死掉——昨晚同一只手点成了茉莉绿茶，
+//   差的只是那个格子。法：没搜索词就拿菜名当搜索词，再没有就拿店含——别为了一个没填的格子把她的咖啡丢在门口。
+const KW = A.kw || (!A.shop ? (A.dish || A.店含 || "") : "");
 let DISH = A.dish || "";
 // ⚠️8/15 京酱肉丝案：上游常把她点名的菜只当 kw、不填 dish——脚本一看没人点菜就直奔月售王，
 //   给她买了碗没人要的京酱肉丝。法：kw 长得像一道具体的菜（≥4字），就先按菜名找（挑名带一字之差档）；
@@ -47,7 +49,15 @@ const 饮品样 = /(美式|拿铁|咖啡|摩卡|卡布|澳白|馥芮白|燕麦|�
 // 10/17：她的忌口——她没点名就默认绕开（往后排/不拿来兜底），她点了名照她的
 const 忌口词 = /麻薯|麻糬|糍粑|青团|糯|珍珠|芋圆|小圆子|西米|年糕|汤圆|元宵|粽|驴打滚|辣条|麻辣/;
 // 10/17：没点名、要挑月售王兜底的时候也得过忌口；她要的是喝的，就别端吃的（17:31 「热可可」整本没对上→月售王端了块苹果肉桂卷）
-const 兜底筛 = (m) => !!(m && m.name) && !忌口词.test(m.name) && !(饮品样.test(短词 || (A.kw || "")) && !饮品样.test(m.name));
+// ⭐11/5 梅子酒案（她要一瓶梅子酒、别太贵的·一家进口超市货架上明摆着「【芳歌】梅酒（含梅子）750ml」，手对不上「梅子酒」三个字，
+//   当成品类词去抓这家卖得多的——食用冰杯、酒鬼豆筋、冰块——连「+」都没摸着，空手回来还报了句「冰块和豆筋没买成」）：
+//   酒也是喝的；货名里带「酒」字的不一定是酒（酒鬼豆筋/酒心巧克力/梅酒味软糖/啤酒鸭）。
+const 酒样 = /(梅酒|梅子酒|青梅酒|啤酒|精酿|白酒|红酒|黄酒|米酒|清酒|烧酒|果酒|洋酒|葡萄酒|鸡尾酒|起泡酒|气泡酒|威士忌|伏特加|白兰地|朗姆|预调酒|微醺|干红|干白|香槟|酒$)/;
+const 是酒货 = (n) => /酒/.test(n || "") && !/酒味|酒心|酒鬼|酒酿|酒精|料酒|醪糟|醉|鸭|鸡|鱼|虾|蟹|排骨|花生|豆筋|豆干|巧克力|蛋糕|冰淇淋|软糖|糖果|薯片|饼干/.test(n || "");
+const 喝的词 = (s) => 饮品样.test(s || "") || 酒样.test(s || "");     // 她嘴里那个词是不是喝的
+const 喝的货 = (n) => 饮品样.test(n || "") || 是酒货(n);              // 货架/菜单上那样东西是不是喝的
+const 凑头避 = (n) => /食用冰|冰块|冰杯|冰袋/.test(n || "") || 是酒货(n);   // 凑起送不拿冰、不拿酒：她要一瓶酒就一瓶，冰更轮不到手替她加
+const 兜底筛 = (m) => !!(m && m.name) && !忌口词.test(m.name) && !(喝的词(短词 || (A.kw || "")) && !喝的货(m.name));
 // ⭐10/15 热可可三分糖案（15:00 定时单拿「热可可 三分糖」整串当菜名，三家翻完报没有）：「三分糖」「半糖」「去冰」这类是规格不是名——
 //   先把它们从词里摘出来当规格（空格隔开的、粘在一起的都算），剩下的才是菜名。
 const 单规 = /^(超大杯|大杯|中杯|小杯|特大份|超大份|大份|中份|小份|大桶|中桶|小桶|三分糖|五分糖|七分糖|三分甜|五分甜|七分甜|半糖|少糖|微糖|不加糖|无糖|全糖|多糖|正常糖|标准糖|少冰|去冰|多冰|正常冰|常温|温热|热的|冰的|热|冰)$/;
@@ -64,7 +74,7 @@ const 拆口语 = (s0) => {
   for (let i = 0; i < 4; i++) {
     let m = 核.match(杯型词);
     if (!m) m = 核.match(份量词);
-    if (!m) { m = 核.match(温度词); if (m && !饮品样.test(核.replace(温度词, ""))) m = null; }
+    if (!m) { m = 核.match(温度词); if (m && (!喝的词(核.replace(温度词, "")) || /^(冰糖|冰淇淋|冰激凌|冰沙|冰粉|冰棍|冰棒|冰皮|热狗|热干|热卤|温州)/.test(核))) m = null; }
     if (!m) break;
     const 词 = m[1] || m[2];
     if (核.length - 词.length < 2) break;
@@ -107,9 +117,21 @@ const out = (o) => {
   // ⭐10/6 她：「长时间停在页面不动就会触发验证」「不用的时候关掉页面更好吗」——用完（成没成都一样）把那间 Chrome那页关成空白，
   //   别在店里/结算页干站着招验证。out 必须照旧同步退出（死() 后面的代码不许再跑），所以另起一个脱身的小进程去关。
   //   撞验证/掉登录不关：那页是留给她划、给她登的。
-  if (!/验证|登录/.test(o.stage || "")) {
-    try { require("child_process").spawn(process.execPath, [require("path").join(__dirname, "手.js"), "去", "about:blank"], { detached: true, stdio: "ignore" }).unref(); } catch {}
-  }
+  // ⭐11/5 夜她的新法（她怕页面一直挂着被当成机器人，让我每次干完活把网页关掉、别留着）：擦白一页不够——付款那条链开出来的
+  //   收银台/密码页/订单详情都还挂着。现在交给 knock_off.js：这只手碰过的站（闪购/支付宝）一页不留，屋里只剩一张白纸。
+  //   · 只有真上过岗（拿到过买手锁）的手才收工——排队没排上的那只不许去关别人正用着的页。
+  //   · 买手锁交到 knock_off.js 手上，它关完页再放锁：下一只手不会撞上正在关的页。
+  //   · 撞验证/掉登录：页留给她点，knock_off.js 带着「等 20 分钟」去——没人来、页也原地没人动，就关掉藏窗；她点完有手接着干就不插手。
+  try {
+    if (globalThis.__持锁 && !globalThis.__不收工) {   // 11/19：「看收银台」排障时页留着（我接着手动看、手动收），不交给收工
+      const 留给她 = /验证|登录/.test(o.stage || "");
+      const 参 = [require("path").join(__dirname, "knock_off.js"), "--域", "ele\\.me|alipay\\.com|taobao\\.com|tmall\\.com"];
+      参.push(...(留给她 ? ["--等", "20"] : ["--接锁"]));
+      const 子 = require("child_process").spawn(process.execPath, 参, { detached: true, stdio: "ignore" });
+      if (!留给她 && 子.pid) { try { fs.writeFileSync("/tmp/takeout-hand.lock/pid", String(子.pid)); globalThis.__锁已交 = true; } catch {} }
+      子.unref();
+    }
+  } catch {}
   process.exit(o.ok ? 0 : 1);
 };
 const 死 = (stage, why, extra = {}) => out({ ok: false, stage, why, ...((globalThis.__足迹 && !extra.足迹) ? { 足迹: globalThis.__足迹 } : {}), ...extra });   // 8/23：足迹永远随死讯带回
@@ -140,11 +162,12 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     const fsL = require("fs");
     const t0 = Date.now();
     let got = false;
-    while (Date.now() - t0 < 180 * 1000) {
+    while (Date.now() - t0 < 300 * 1000) {   // 11/21：三分钟→五分钟（前一趟翻三家常要五分钟；后端时限跟着放到 840s）
       try {
         fsL.mkdirSync(LOCK);
         fsL.writeFileSync(LOCK + "/pid", String(process.pid));
-        process.on("exit", () => { try { fsL.rmSync(LOCK, { recursive: true, force: true }); } catch (e) {} });
+        process.on("exit", () => { if (globalThis.__锁已交) return; try { fsL.rmSync(LOCK, { recursive: true, force: true }); } catch (e) {} });   // 11/5：锁交给 knock_off.js 了就不在这儿撤
+        globalThis.__持锁 = true;
         got = true; break;
       } catch (e) {
         try { if (Date.now() - fsL.statSync(LOCK).mtimeMs > 10 * 60 * 1000) { fsL.rmSync(LOCK, { recursive: true, force: true }); continue; } } catch (e2) {}
@@ -160,7 +183,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         await 睡(4000);
       }
     }
-    if (!got) 死("排队", "另一只手占着那间 Chrome，三分钟没等到——歇口气再点");
+    if (!got) 死("排队", "另一只手占着那间 Chrome，五分钟没等到——前头那单完了再点");
   }
 
   let browser;
@@ -181,13 +204,22 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     let _见店堂 = false, _见首页 = false, _扫 = 0;
     for (const _p of ctx.pages().reverse()) {
       const _u = _p.url();
-      if (!/h5\.ele\.me/.test(_u)) continue;                       // 别人家的标签（京东那些）不碰
-      if (/ele-order-detail/.test(_u)) continue;                    // 她的订单详情，永不碰
+      if (!/ele\.me|alipay\.com/.test(_u)) continue;               // 别人家的标签（京东那些）不碰
+      // 11/5 她改了法：干完活把网页关掉、别留着——订单详情页、支付宝那几页也不留了（骑手到哪她在手机上看）；
+      //   正常收工归 knock_off.js，这儿只扫被掐掉的那一趟剩下的。
       if (/ele-takeout-index/.test(_u) && !_见店堂) { _见店堂 = true; continue; }
       if (/minisite|minisearch/.test(_u) && !_见首页) { _见首页 = true; continue; }
       try { await _p.close(); _扫++; } catch {}
     }
     if (_扫) console.error(`开跑前收了摊：关掉 ${_扫} 个上一趟剩下的外卖标签`);   // ⚠️足迹[] 在下面才出生，这儿只能走 stderr
+  } catch {}
+  // ⭐11/5 她划验证时看见屋里攒了好几张空白页：10/6 起每趟收工把自己那页关成空白，下一趟却不认空白页、
+  //   又新开一张——一趟攒一张，那晚攒了五六张。空白页只留一张（下面认页时就复用它），多的关掉。
+  try {
+    const _白 = ctx.pages().filter((_p) => _p.url() === "about:blank");
+    let _关 = 0;
+    for (const _p of _白.slice(1)) { try { await _p.close(); _关++; } catch {} }
+    if (_关) console.error(`开跑前收了摊：关掉 ${_关} 张多余的空白页`);
   } catch {}
 
   // 一天一单、同店一天一进（8/13 风控课）——这两道闸在动页面之前先查，撞了连浏览器都不惊动
@@ -199,9 +231,10 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
   // ⚠️8/13 三诊：只许复用「搜索页/店铺页」这两种**我自己那条路上的页**——
   //   她正看着的地址页/订单详情页一律不碰（我抢过一次她手上的地址页，goto 当场 ERR_ABORTED）。
   let page = ctx.pages().reverse().find(
-    (p) => /h5\.ele\.me\/(minisearch|2021001185671035\/pages\/ele-takeout-index)/.test(p.url()));
+    (p) => /h5\.ele\.me\/(minisearch|2021001185671035\/pages\/ele-takeout-index)/.test(p.url()))
+    || ctx.pages().find((p) => p.url() === "about:blank");   // 11/5：上一趟收工留下的那张空白页就是给这一趟用的，别再新开
   const 我开的 = !page;
-  if (!page || page.isClosed()) page = await ctx.newPage();
+  if (!page || page.isClosed()) page = await require("./offscreen_page.js").屏外开页(browser, ctx);   // 11/5：收工后屋里一页不留；没窗就把新窗直接开在屏外，不到她眼前晃
   page.setDefaultTimeout(15000);
 
   // ⭐8/13 四诊·她一句话点破的（「是因为你打开的页面是浏览器大小，渲染就有问题，
@@ -262,6 +295,35 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     触 = await ctx.newCDPSession(page);
     await 触.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   } catch {}
+  // ⭐11/10 补 11/9 那趟「页面崩了」：10:30 的定时单，刚开出来的那张页头一敲首页就报「页已经关了」，三敲全敲在一张死页上＝整单白瞎
+  //   （页为什么没的没查实：当时屋里没窗、页是屏外新开的，前后六趟同一条路都好好的）。现在敲门发现页没了就重开一张，
+  //   把窗宽／定位／手指这三样重新装上再敲。
+  const 页没了 = (e) => { try { if (page.isClosed()) return true; } catch {} return /has been closed|Target closed/i.test(String(e)); };
+  const 换新页 = async (第几回) => {
+    try { page = 第几回 <= 1 ? await require("./offscreen_page.js").屏外开页(browser, ctx) : await ctx.newPage(); }
+    catch { page = await ctx.newPage(); }
+    page.setDefaultTimeout(15000);
+    try {
+      const bs = await browser.newBrowserCDPSession();
+      const ps = await ctx.newCDPSession(page);
+      const { targetInfo } = await ps.send("Target.getTargetInfo");
+      const { windowId } = await bs.send("Browser.getWindowForTarget", { targetId: targetInfo.targetId });
+      const { bounds } = await bs.send("Browser.getWindowBounds", { windowId });
+      if (!bounds.width || bounds.width > 520) {
+        await bs.send("Browser.setWindowBounds", { windowId, bounds: { width: 430, height: 920, windowState: "normal" } });
+        还原窗 = async () => { try { await bs.send("Browser.setWindowBounds", { windowId, bounds }); } catch {} };
+        await 睡(1200);
+      }
+    } catch {}
+    try {
+      const 点 = (坐标表[ADDR] && 坐标表[ADDR].latitude) ? 坐标表[ADDR]
+               : (LAT && LNG ? { latitude: Number(LAT), longitude: Number(LNG) } : null);
+      if (!点) throw new Error("没坐标");
+      const ps2 = await ctx.newCDPSession(page);
+      await ps2.send("Emulation.setGeolocationOverride", { ...点, accuracy: 25 + Math.random() * 20 });
+    } catch {}
+    try { 触 = await ctx.newCDPSession(page); await 触.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 }); } catch { 触 = null; }
+  };
   const 滑 = async (dy = 420) => {
     const x = 210 + Math.floor(Math.random() * 70);
     const y0 = dy > 0 ? 700 + Math.floor(Math.random() * 60) : 260 + Math.floor(Math.random() * 60);
@@ -391,6 +453,122 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     if (!有) { 足迹.push(`「${名}」没找着`); return false; }
     return 鼠标点("[data-tap='1']", 名);
   };
+  // ⭐11/21 支付宝掐（一天里两单倒在同一处）：口令敲完，支付宝立起一层
+  //   「当前操作可能存在风险，为保护资金安全，我们中断了此次操作。｜取消｜申请继续交易」。旧法不认得它，干等十八秒报「没等到支付成功」，
+  //   家里只说了句「卡在付款那步了」，她不知道单已经下好、手机上点一下就能付。
+  //   ⭐同夜她定的规矩（我头一版写的是「不点、把单留给她付」，她不认——号是她的，她说了算）：那颗「申请继续交易」是
+  //   支付宝留给号主的门。她的号、她让点＝这只手就点，照它要的验——短信码自己到「信息」里读、口令自己敲；只有它要她本人的脸／证件，
+  //   或来的是一张认不得的页，才留底、照实说、把单留给她手机上付。一单里只走这一遍，不来回重敲。
+  //   ⚠️点过去之后长什么样，写这段时还没见过：下面几样（短信码／再敲一遍口令／一颗确认钮）是猜的。头一回真撞上，先看
+  //   留底/「…申请继续…」那几张和足迹，照真样子改。戳（支付宝掐过.json）只记时刻，排障用，不拦路。
+  const 支付宝掐 = (t) => /存在风险|中断了此次操作|申请继续交易/.test(t || "");
+  const 掐本 = path.join(__dirname, "支付宝掐过.json");
+  const 记掐 = () => { try { fs.writeFileSync(掐本, JSON.stringify({ at: Date.now(), 时: new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 19).replace("T", " ") }), "utf8"); } catch {} };
+  const 掐尾 = "——订单挂着待支付，十五分钟内你打开手机淘宝闪购，在订单里点「去支付」就行";
+  const 过掐 = async (单) => {
+    const 交 = async (why, 标) => {
+      const 根 = await 留底("申请继续·" + 标);
+      死("付款", "单我下好了；支付宝说这笔有风险，" + why + 掐尾, { ...(单 || {}), 待支付: true, 支付宝掐: 标, 页面: (await 文()).slice(0, 160), 留底: 根 });
+    };
+    记掐();
+    足迹.push("支付宝说这笔有风险、把付款掐了——照她的话点「申请继续交易」");
+    await 留底("支付宝掐了·点申请继续之前");
+    if (!(await 点字("申请继续交易", "申请继续交易"))) return 交("那颗「申请继续交易」我没点上", "没点上");
+    let 发起 = Date.now() - 3000, 敲过 = false, 填过 = false, 上眼 = "";
+    for (let i = 0; i < 8; i++) {
+      await 慢(2600, 4200);
+      const t = await 文();
+      if (/支付成功/.test(t)) { 足迹.push("申请继续之后付成了"); return true; }
+      if (t !== 上眼) { await 留底(`申请继续·第${i + 1}眼`); 上眼 = t; }
+      if (/人脸|刷脸|扫脸|面容|眨眼|摄像头|身份证|证件号|银行卡号|安全问题/.test(t)) {
+        足迹.push("它要她本人的脸／证件——这只手过不去");
+        return 交("我点了「申请继续交易」，它要你本人刷脸（或证件）才放行", "要她本人");
+      }
+      const 六格 = page.locator("input.my-passcode-input-native-input").first();
+      const 有六格 = (await 六格.count().catch(() => 0)) > 0;
+      if (/短信|校验码|验证码/.test(t) && !填过) {
+        if (/获取验证码|发送验证码|获取校验码|发送校验码/.test(t) && !/秒后|重新发送|已发送/.test(t)) {
+          for (const 钮 of ["获取验证码", "发送验证码", "获取校验码", "发送校验码"]) if (await 点字(钮, 钮 + "（支付宝往她手机发一条）")) break;
+          发起 = Date.now() - 3000; await 慢(1500, 2500);
+        }
+        try { require("child_process").execFileSync("open", ["-g", "-a", "Messages"], { timeout: 5000, stdio: "ignore" }); } catch {}
+        let 码 = null;
+        for (let k = 0; k < 30 && !码; k++) { const r = 读码(发起, /支付宝|校验码/); 码 = r && r.码; if (!码) await 睡(5000); }
+        if (!码) { 足迹.push("支付宝的验证码两分半没同步到这台电脑"); return 交("我点了「申请继续交易」，它往你手机发了验证码，可两分半没同步到这台电脑", "码没到"); }
+        足迹.push(`读到支付宝的码（短信 ${码.at}）`);
+        if (有六格) await 六格.pressSequentially(码.code, { delay: 100 + Math.floor(Math.random() * 80) });
+        else {
+          const 有框 = await page.evaluate(() => {
+            document.querySelectorAll("[data-zin]").forEach((e) => e.removeAttribute("data-zin"));
+            const e = [...document.querySelectorAll("input")].filter((x) => { const r = x.getBoundingClientRect(); return r.width > 60 && r.height > 18 && r.x >= 0 && r.y >= 0 && !x.disabled && x.type !== "hidden"; }).pop();
+            if (!e) return false; e.setAttribute("data-zin", "1"); return true;
+          }).catch(() => false);
+          if (!有框) return 交("我点了「申请继续交易」，验证码读到了，却没找着填它的那一格", "没处填");
+          await 鼠标点("[data-zin='1']", "验证码那格");
+          await page.keyboard.type(码.code, { delay: 110 + Math.floor(Math.random() * 70) });
+        }
+        填过 = true; 足迹.push("支付宝的码填上了"); await 慢(2600, 4200);
+        const t2 = await 文();
+        if (!/支付成功|支付密码/.test(t2)) for (const 钮 of ["确定", "下一步", "提交"]) if (await 点字(钮, 钮 + "（验证码填完）")) break;
+        continue;
+      }
+      if (支付宝掐(t)) { if (i >= 2) break; continue; }       // 那层还立着：多看一两眼，还在就收
+      if (/支付密码/.test(t) && 有六格 && !敲过) {
+        const pw = 口令(); if (!pw) return 交("它要再敲一遍支付口令，~/.takeout_pay 里没有", "没口令");
+        await 六格.pressSequentially(pw, { delay: 95 + Math.floor(Math.random() * 80) });
+        敲过 = true; 足迹.push("申请继续之后又敲了一遍口令"); continue;
+      }
+      let 按了 = false;
+      for (const 钮 of ["确认付款", "继续付款", "继续支付", "继续交易", "确认继续", "我知道了", "知道了"]) {
+        if (t.includes(钮) && (await 点字(钮, 钮 + "（申请继续之后）"))) { 按了 = true; break; }
+      }
+      if (!按了 && i >= 3) break;
+    }
+    if (/支付成功/.test(await 文())) { 足迹.push("申请继续之后付成了"); return true; }
+    足迹.push("点过「申请继续交易」，后面那一页没走完");
+    return 交("我点了「申请继续交易」，后面那一页我没认出来、没走完", "没走完");
+  };
+  // ⭐11/19（她说这几天点外卖都不成功：11/12 起五单全倒在付钱页，家里只留了那页头 160 个字，真样子谁也没见过）：
+  //   付钱那一段倒下时把那一刻留下来——拍一张、网址和每个框里的字抄一份、看得见的小件连坐标列一张单子，落在脚本旁的 留底/。
+  //   回执里带 留底 的路径；排障先看它，别再照那 160 个字猜。
+  const 留底 = async (名) => {
+    try {
+      const d = path.join(__dirname, "留底"); fs.mkdirSync(d, { recursive: true });
+      const 戳 = new Date(Date.now() + 8 * 3600 * 1000).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const 根 = path.join(d, `${戳}-${名}`);
+      const 记 = { 时: 戳, url: page.url(), 别的页: ctx.pages().filter((p) => p !== page).map((p) => p.url().slice(0, 140)), frames: [], 件: [] };
+      for (const fr of page.frames()) {
+        let t = ""; try { t = await fr.evaluate(() => (document.body && document.body.innerText) || ""); } catch {}
+        记.frames.push({ url: fr.url().slice(0, 180), 字: t.slice(0, 3000) });
+      }
+      try {
+        记.件 = await page.evaluate(() => {
+          const 出 = [];
+          const walk = (root) => {
+            for (const el of root.querySelectorAll("*")) {
+              if (出.length > 220) return;
+              if (el.shadowRoot) walk(el.shadowRoot);
+              const r = el.getBoundingClientRect();
+              if (r.width < 6 || r.height < 6) continue;
+              const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join("");
+              const t = own || (el.children.length === 0 ? ((el.innerText || "").trim() || el.getAttribute("aria-label") || el.getAttribute("alt") || el.getAttribute("placeholder") || "") : "");
+              const 勾 = el.tagName === "INPUT" ? `[${el.type}${el.checked ? "·勾着" : ""}]` : "";
+              if (!t && !勾) continue;
+              if (t.length > 44) continue;
+              出.push({ t: (勾 + t).slice(0, 48), tag: el.tagName, cls: String(el.className && el.className.baseVal !== undefined ? el.className.baseVal : el.className || "").slice(0, 60),
+                        x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) });
+            }
+          };
+          walk(document);
+          return 出;
+        });
+      } catch (e) { 记.件错 = String(e.message).slice(0, 80); }
+      fs.writeFileSync(根 + ".json", JSON.stringify(记, null, 1));
+      try { await page.screenshot({ path: 根 + ".png", timeout: 9000, animations: "disabled" }); } catch (e) { 足迹.push("留底：图没拍成 " + String(e.message).slice(0, 50)); }
+      足迹.push("留底 → " + 根);
+      return 根;
+    } catch (e) { 足迹.push("留底没留成：" + String(e.message).slice(0, 60)); return ""; }
+  };
 
   // ⭐⭐9/30 掉登录自己登回去（她第三回来说「外卖掉了」——这间长住的 Chrome 隔几天就被平台踹下线一回，
   //   每回都得等人拿手机扫码。这回把登回去的路做进脚本）。登录页的样子：
@@ -406,11 +584,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
   //   ⚠️发码后那个滑块常驻 DOM 但 display:none；真露脸了＝交给人划，机器不碰（同 查验证 的规矩）。
   //   手机号别写进脚本（它迟早会被 push 出去）：参数 phone，或环境变量 TAKEOUT_PHONE，或 ~/.takeout/places.json 里的 "phone"。
   const 手机号 = String(A.phone || process.env.TAKEOUT_PHONE || 地点簿.phone || "");
-  const 读码 = (since) => {
+  const 读码 = (since, 认) => {      // 11/21：认＝哪家发来的才算数（默认闪购那几家；支付宝的校验码递 /支付宝|校验码/）
     const 筛 = (rows) => {
       for (const r of rows || []) {
         const t = String(r.text || "");
-        if (r.mine || !/闪购|淘宝|饿了么/.test(t)) continue;
+        if (r.mine || !(认 || /闪购|淘宝|饿了么/).test(t)) continue;
         const at = Date.parse(String(r.at || "").replace(" ", "T"));
         if (isFinite(at) && at < since) continue;                   // 上一回的旧码不认
         const m = t.match(/(?:验证码|校验码|动态码)[^\d]{0,12}(\d{4,8})/) || t.match(/(?<!\d)(\d{6})(?!\d)/);
@@ -438,6 +616,88 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     }
     return { 路: "都不通", 码: null, 病: "sms_code.py 读不到信息库（多半没给完全磁盘访问）" };
   };
+  // ⭐11/10 登录后的「身份验证」页（闪购自己加的一道门·头一回见）。两种长相：
+  //   · 语音（今天见到的这种·#codeType=audio·钮「获取语音验证码」）：按了，闪购打电话到她手机念四位数。电话我接不了，
+  //     所以只在她点了头、人在跟前时才按（入参 验身:"打"）；四位数等她递进 /tmp/takeout-verify-code（她报数、这头替她写进去），
+  //     填进去按「确定」。没点头的单（定时单、她不在跟前）不按——白响她一通电话也没人把数递回来——说清楚卡在哪就收手，页不留。
+  //   · 短信（没见过·照登录码那条路写的·没真跑过）：按钮发码，照旧到这台 Mac 的「信息」里读。
+  const 验身码档 = "/tmp/takeout-verify-code";
+  const 验身框 = () => page.frames().find((f) => /identity_verify|\/iv\/(mini|phone)\//.test(f.url()));
+  const 验身 = async () => {
+    // 11/10 头一趟真跑逮的：登录框先换成一页过场（「账号: 1xx****** 即将进行操作 正在检测你的安全产品...」），
+    //   几秒后才落到 identity_verify.htm——我 1.5 秒就去认，认了张过场页报「没认出来」。现在等校验码那一格真站出来（最多 25 秒），
+    //   每一拍把框重新找一遍（框在换网址）。
+    const 看框 = (fr) => fr.evaluate(() => {
+      const g = (s) => document.querySelector(s);
+      return { 型: (g("#codeType") || {}).value || "", 钮: ((g("#J_GetCode") || {}).innerText || "").trim(),
+               字: ((document.body && document.body.innerText) || "").replace(/\s+/g, " ").slice(0, 140),
+               话: ((g(".checkcode-msg") || {}).innerText || "").trim(), 有格: !!g("#J_Checkcode"), 有确定: !!g("#btn-submit") };
+    }).catch(() => null);
+    let f = null, 态 = null, 末 = "";
+    for (let i = 0; i < 50 && !f; i++) {
+      if (!/\/login/.test(page.url())) { 足迹.push("过场页自己跳走了，没要验身"); return; }
+      for (const fr of page.frames()) {
+        if (fr === page.mainFrame()) continue;
+        const s = await 看框(fr);
+        if (s && s.有格 && s.有确定) { f = fr; 态 = s; break; }
+        if (s && s.字) 末 = s.字;
+      }
+      if (!f) await 睡(500);
+    }
+    const 看 = () => 看框(f);
+    if (!f) 死("验身", "登录码填了也按了登录，闪购又弹出一页身份验证，可 25 秒没等到填校验码的那一格（换皮了）", { 现场: 末 });
+    await 睡(1200);
+    const 语音 = /audio/i.test(态.型) || /语音/.test(态.钮);
+    足迹.push(`登录后多了一道「身份验证」（${语音 ? "语音电话" : "短信"}·钮「${态.钮}」）`);
+    if (语音 && A.验身 !== "打") {
+      死("验身", "闪购登录多了一道电话验身：要打电话到你手机念四位数，没有短信可读，我接不了电话——这单先在手机上点；" +
+                 "有空接电话时说一声，我按、你听、把四位数告诉我，就登回去了", { 要她接电话: true });
+    }
+    const 按时 = Date.now();
+    try { fs.rmSync(验身码档, { force: true }); } catch {}
+    try { await f.locator("#J_GetCode").click({ timeout: 8000 }); }
+    catch (e) { 死("验身", "身份验证那页的取码钮按不着：" + String(e.message).slice(0, 60)); }
+    let 四 = "";
+    if (语音) {
+      let 话 = "";
+      for (let i = 0; i < 20 && !话; i++) { await 睡(500); 话 = ((await 看()) || {}).话 || ""; }
+      足迹.push("按了「获取语音验证码」：" + (话 || "页面没回话"));
+      // 页面明说没拨成才收手；没回话或话不认识都照旧等她报数（电话响没响她知道），别在电话已经拨出去之后把页关了
+      if (/超时|失败|频繁|过多|上限|稍后|错误|刷新/.test(话) && !/拨出|接听/.test(话)) 死("验身", "按了语音验证码，电话没拨出来——页面说：" + 话);
+      try {
+        const 拦 = await f.evaluate(() => [...document.querySelectorAll(".baxia-dialog, iframe[src*='punish'], .nc-container, [id^='nc_'][id$='wrapper']")].some((e) => e.offsetWidth > 10 && e.offsetHeight > 10));
+        if (拦) 死("验身", "按语音验证码时弹了人机验证，那一下得人在这台电脑上亲手划——这回登不回去，先在手机上点");
+      } catch {}
+      console.error(`【验身】${话}——等四位数（写进 ${验身码档}），最多等 360 秒`);
+      for (let i = 0; i < 180 && !四; i++) {
+        await 睡(2000);
+        try {
+          if (fs.statSync(验身码档).mtimeMs >= 按时) { const m = fs.readFileSync(验身码档, "utf8").match(/(?<!\d)\d{4}(?!\d)/); if (m) 四 = m[0]; }
+        } catch {}
+      }
+      try { fs.rmSync(验身码档, { force: true }); } catch {}
+      if (!四) 死("验身", "电话拨出去了，360 秒没等到四位数——这回先收手，页不留");
+    } else {
+      足迹.push("按了身份验证的取码钮（短信那种）");
+      for (let i = 0; i < 20 && !四; i++) { await 睡(5000); const r = 读码(按时 - 15000); if (r.码) 四 = r.码.code; }
+      if (!四) 死("验身", "身份验证的短信码发了，100 秒没在这台 Mac 的「信息」里等到——这回先收手");
+    }
+    try {
+      const 格 = f.locator("#J_Checkcode");
+      await 格.click(); await 睡(300);
+      await 格.pressSequentially(四, { delay: 120 + Math.floor(Math.random() * 90) });
+      await 慢(900, 1800);
+      await f.locator("#btn-submit").click();
+      足迹.push("四位数填完按了「确定」");
+    } catch (e) { 死("验身", "四位数拿到了，可填码/按确定那一下没成：" + String(e.message).slice(0, 60)); }
+    try { await page.waitForURL((u) => !/\/login/.test(u.toString()), { timeout: 25000 }); }
+    catch {
+      let 错 = "";
+      try { const f2 = 验身框(); if (f2) 错 = await f2.evaluate(() => ((document.querySelector(".checkcode-msg,.ui-tiptext-error") || document.body).innerText || "").replace(/\s+/g, " ").trim().slice(0, 80)); } catch {}
+      死("验身", "四位数填了也按了确定，25 秒还在登录页" + (错 ? `（页面说：${错}）` : ""));
+    }
+    足迹.push("身份验证过了");
+  };
   const 重登 = async (where, 只到发码前 = false) => {
     if (A.不发码 && !只到发码前) {   // 10/15 凌晨一度按「定时单不发码」做的，她说以为那是风控验证码、让照旧自己登——撤回：定时单照旧自己登；
                                       //   这道闸留给明说 不发码:true 的单（她哪天真不想手机上收码再用）
@@ -457,8 +717,15 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     const fl = page.frameLocator("#alibaba-login-box, iframe[src*='passport'], iframe[src*='login']").first();
     const 框里字 = async (loc, n = 60) => { try { return ((await loc.innerText({ timeout: 1500 })) || "").trim().slice(0, n); } catch { return ""; } };
     // 框是另一个域慢慢装进来的——等手机号框真站出来再读区号，别拿半张框判区号（读空＝不拨＝码发去美国）
+    // ⭐11/14 晚：线慢的时候框是张白纸（iframe 挂上了、里头一个字没渲染），15 秒等不到——像人一样刷新一回再等 30 秒，还没有才收手
     try { await fl.getByRole("textbox", { name: "请输入手机号" }).waitFor({ timeout: 15000 }); }
-    catch { 死("登录", "掉登录了，登录框装出来了可 15 秒没见手机号那格（框换皮了？）"); }
+    catch {
+      足迹.push("登录框 15 秒还是白的，刷新一回再等");
+      try { await page.reload({ waitUntil: "domcontentloaded", timeout: 40000 }); } catch {}
+      await 慢(2000, 3500);
+      try { await fl.getByRole("textbox", { name: "请输入手机号" }).waitFor({ timeout: 30000 }); }
+      catch { 死("登录", "掉登录了，登录框刷新过一回还是白的（等了 45 秒没见手机号那格）——多半是今晚线慢，过会儿再点"); }
+    }
     await 慢(1500, 3000);
     const 勾上 = async () => {     // 勾「已阅读并同意」：先正经点，点不动（格子藏着）就 force 一下；回报勾没勾上
       const 勾 = fl.getByRole("checkbox").first();
@@ -537,7 +804,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
           if (!(await 重发.isVisible({ timeout: 3000 }).catch(() => false))) break;
           await 重发.click({ timeout: 8000 });
           发码时刻 = Date.now() - 15000;
-          足迹.push("100 秒没等到码，按了一次「重新发送」再等 100 秒");
+          足迹.push("150 秒没等到码，按了一次「重新发送」再等 300 秒");
           await 睡(2500);
           const 滑块 = fl.locator("#nocaptcha-smsLogin, .nc_wrapper, .nc-container, [id*='nocaptcha']").first();
           if (await 滑块.isVisible({ timeout: 1500 }).catch(() => false)) {
@@ -545,13 +812,13 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
           }
         } catch { break; }
       }
-      for (let i = 0; i < 20 && !码; i++) {
+      for (let i = 0; i < (轮 === 0 ? 30 : 60) && !码; i++) {   // ⭐11/14：头一轮等 150 秒、重发后等 300 秒（短信转发到这台 Mac 有时要好几分钟·10/8 量过 315 秒·11/14 四回都晚于 100 秒）
         await 睡(5000);
         const r = 读码(发码时刻);
         路 = r.路; 病 = r.病 || ""; 码 = r.码;
       }
     }
-    if (!码) 死("登录", `掉登录了，码发出去了（含重发一次）但 200 秒没在这台 Mac 的「信息」里等到闪购的短信（读码走的「${路}」${病 ? "·" + 病 : ""}）——` +
+    if (!码) 死("登录", `掉登录了，码发出去了（含重发一次）但 450 秒没在这台 Mac 的「信息」里等到闪购的短信（读码走的「${路}」${病 ? "·" + 病 : ""}）——` +
                      "她手机的短信同步没到？或读码没权限；这回不再发码，下回再登");
     掐.读到 = Date.now();
     const 落库 = Date.parse(String(码.at || "").replace(" ", "T"));
@@ -566,15 +833,29 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       await fl.getByRole("button", { name: "同意协议并登录" }).click();
       足迹.push(`码填完按了登录（读到码起 ${秒(掐.读到, Date.now())}s）`);
     } catch (e) { 死("登录", "掉登录了，码读到了但填码/按登录那一下没成：" + String(e.message).slice(0, 60)); }
-    try { await page.waitForURL((u) => !/\/login/.test(u.toString()), { timeout: 20000 }); }
-    catch {
-      let 错 = "";
-      try { 错 = await 框里字(fl.locator("[class*='error' i],[class*='err-' i],[class*='msg' i],[class*='toast' i]").first(), 60); } catch {}
-      死("登录", "掉登录了，码也填了，按了登录 20 秒还在登录页" + (错 ? `（框里说：${错}）` : ""));
+    // ⭐11/10「为什么点外卖又出问题了，哪里卡了」：按完登录，登录框没跳走，换成了「身份验证」一页
+    //   （框里的网址变成 ipassport…/iv/mini/identity_verify.htm；字是「你正在使用手机短信验证身份／校验码：4位数字／
+    //   获取语音验证码／确定」，#codeType=audio＝只给语音电话这一条路：按了它，闪购打电话到她手机念四位数，没有短信可读）。
+    //   旧法只认「网址离开 /login」，干等 20 秒报「还在登录页」，家里那句成了「登录页一直转圈」——她不知道卡在哪。
+    //   现在认得这一页（见 验身()）。
+    {
+      const t0 = Date.now();
+      while (Date.now() - t0 < 20000 && /\/login/.test(page.url()) && !验身框()) await 睡(500);
+    }
+    if (/\/login/.test(page.url())) {
+      if (验身框()) await 验身();
+      else {
+        let 错 = "";
+        try { 错 = await 框里字(fl.locator("[class*='error' i],[class*='err-' i],[class*='msg' i],[class*='toast' i]").first(), 60); } catch {}
+        死("登录", "掉登录了，码也填了，按了登录 20 秒还在登录页" + (错 ? `（框里说：${错}）` : ""));
+      }
     }
     await 慢(2000, 3500);
     足迹.push("登回去了 → " + page.url().replace(/\?.*$/, "") + `（按发码→登回去 ${秒(掐.按发码, Date.now())}s）`);
     console.error("掉登录·自己登回去了（" + where + "·按发码→登回去 " + 秒(掐.按发码, Date.now()) + "s" + (isFinite(落库) ? "·短信落库→读到 " + 秒(落库, 掐.读到) + "s" : "") + "）");
+    // ⭐11/14：等短信等得太久（>200 秒）这一趟剩下的时间不够把单点完——登是登回去了，收手说清楚，她再说一遍就能点成（别让后端的总时限半路掐在加购/付款上）
+    if (!A.重登试 && 掐.按发码 && Date.now() - 掐.按发码 > 200000)
+      死("登录", `掉过登录，已经自己登回去了；只是等短信验证码等了 ${秒(掐.按发码, Date.now())} 秒，这一趟来不及把单点完——再说一遍要什么，我马上去点`);
     return true;
   };
   // 掉门就重登、再回到本来要去的那页（等 等() 为真才算到；等不到照旧往下走，让后面的判据说话）
@@ -590,18 +871,106 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
   };
 
   // 收银台那一段（8/14 抽出来）：正常那条路走到这儿要用，「续付」那条路也要用。
+  // ⭐11/10 她的法：余额宝不够的时候改走她点名的那一张卡（口令同一个）——默认的方式余额不足那道墙立起来之后：余额宝能用就走余额宝；
+  //   余额宝不在能付的方式里（或它自己也标着不够）就走「后手」那一样。别的卡、花呗照旧不碰。
+  //   后手是哪一样别写进脚本：参数 付法后手，或环境变量 TAKEOUT_PAY_FALLBACK，或 ~/.takeout/places.json 的 "付法后手"——
+  //   填收银台上那一行的名字（比如「xx银行储蓄卡」）；不填＝只认余额宝。
+  //   回挑中的名字；两样都不在回 ""（外面说清楚、收手）。
+  const 墙后换付法 = async () => {
+    const 墙 = await 文();
+    // 11/10 头一趟真跑：墙上的列表里有「余额宝」三个字，点了它却没出「确认付款」＝它付不了这一单（多半排在不可用那一栏）。
+    //   所以挨个试：点一样→出了「确认付款」才算数；没出就换下一样。入参 付法:"后手" 可以直接跳过余额宝。
+    const 宝 = (墙.match(/余额宝[^\n]*(?:\n[^\n]*){0,2}/) || [""])[0].replace(/\n/g, "｜");
+    if (宝) 足迹.push("墙上余额宝那一行：" + 宝.slice(0, 60));
+    const 候 = [];
+    const 后手 = String(A.付法后手 || process.env.TAKEOUT_PAY_FALLBACK || 地点簿.付法后手 || "").trim();
+    if (/余额宝/.test(墙) && !/余额宝[\s\S]{0,30}(余额不足|不可用)/.test(墙) && A.付法 !== "后手") 候.push("余额宝");
+    if (后手 && 墙.includes(后手)) 候.push(后手);
+    for (const 名 of 候) {
+      足迹.push(`默认的付款方式余额不足 → 试${名}`);
+      if (!(await 点字(名, 名))) { try { await page.getByText(名, { exact: false }).first().click({ timeout: 5000 }); } catch { continue; } }
+      await 慢(2000, 3200);
+      let 按了 = await 点字("确认付款", `确认付款（${名}）`);
+      if (!按了) { try { await page.getByText("确认付款", { exact: false }).first().click({ timeout: 4000 }); 按了 = true; } catch {} }
+      if (按了) { await 慢(2500, 4000); return 名; }
+      足迹.push(`点了${名}之后没出「确认付款」＝这一样付不了，换下一样`);
+    }
+    return "";
+  };
   // ⚠️8/14 十四诊：收银台是**两页**，而且最后那颗叫「确认付款」不是「确认支付」——
   //   差一个字，我点了个空，订单就那么挂着。所以：认这一族词、连按几回，直到密码框或「支付成功」。
+  // ⭐⭐11/19（那几天点外卖都不成功的真凶）：**那间 Chrome里的支付宝掉了登录**（11/11 夜还付得成，11/12 起五单全倒在这儿）。
+  //   掉了登录，「确认支付」之后来的不是老收银台，是一张挑付款方式的页（网址 h5pay/unifiedLogin·字＝添加银行卡／中国农业银行／工商银行／
+  //   支付宝余额／余额宝／花呗／找人代付＋一颗「付款」），老手只认「确认付款」，干等到超时报「没等到支付成功」。
+  //   登回去的路（当晚手走通）：点「余额宝」→ 底下弹「验证手机号」→ 填她的号 →「下一步」
+  //   （这一下支付宝往她手机发一条验证码）→ 弹层换成「请输入短信验证码」，底下有一行「验证支付密码」，点它 → 敲支付口令 →
+  //   跳到老收银台（h5pay/cashierPreConfirm·写着她的号、余额宝可用多少、「确认付款」）→ 后面照旧（确认付款→输入支付密码→支付成功）。
+  //   短信那条路不走：她手机到这台机的短信转发时快时慢（当晚一分钟没到），口令那条路几秒就过。口令不对＝收手，不敲第二遍。
+  let 支付宝登过 = false;
+  const 支付宝登回 = async () => {
+    足迹.push("支付宝掉登录了（来的是挑付款方式的页），自己登回去");
+    const 等字 = async (re, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (re.test(await 文())) return true; await 睡(700); } return false; };
+    const 点框 = async (名) => {     // 弹层里那只看得见的输入框：打标记、真鼠标点进去
+      const 有 = await page.evaluate(() => {
+        document.querySelectorAll("[data-zin]").forEach((e) => e.removeAttribute("data-zin"));
+        const e = [...document.querySelectorAll("input")].filter((x) => { const r = x.getBoundingClientRect(); return r.width > 120 && r.height > 20 && r.x >= 0 && r.y >= 0 && !x.disabled; }).pop();
+        if (!e) return false; e.setAttribute("data-zin", "1"); return true;
+      }).catch(() => false);
+      if (!有) { 足迹.push(`${名}：没找着输入框`); return false; }
+      return 鼠标点("[data-zin='1']", 名);
+    };
+    if (!/验证手机号|请输入短信验证码/.test(await 文())) {
+      if (!(await 点字("余额宝", "余额宝（没登录的挑付款方式页）"))) return false;
+      if (!(await 等字(/验证手机号|请输入短信验证码|验证支付密码/, 12000))) { 足迹.push("点了余额宝，没等到「验证手机号」"); return false; }
+    }
+    if (/验证手机号/.test(await 文()) && !/请输入短信验证码/.test(await 文())) {
+      if (A.不发码) { 足迹.push("这单说了不发码——支付宝要往她手机发验证码才登得回去，收手"); return false; }
+      if (!(await 点框("手机号那格"))) return false;
+      await page.keyboard.type(手机号, { delay: 110 + Math.floor(Math.random() * 70) });
+      await 慢(900, 1800);
+      if (!(await 点字("下一步", "下一步（支付宝往她手机发一条验证码）"))) return false;
+      if (!(await 等字(/请输入短信验证码|验证支付密码/, 20000))) { 足迹.push("按了下一步，没等到验证那一层"); return false; }
+    }
+    await 慢(1200, 2400);
+    if (!/验证支付密码/.test(await 文())) { 足迹.push("验证那一层没给「验证支付密码」这条路（只有短信）——收手"); return false; }
+    if (/请输入短信验证码/.test(await 文())) {       // 还在短信那一层：换到口令那条路
+      if (!(await 点字("验证支付密码", "验证支付密码（不等短信，走口令）"))) return false;
+      await 慢(1500, 2600);
+    }
+    const pw = 口令();
+    if (!pw) { 足迹.push("要支付口令，~/.takeout_pay 里没有"); return false; }
+    if (!(await 点框("口令那格"))) return false;
+    await page.keyboard.type(pw, { delay: 120 + Math.floor(Math.random() * 80) });
+    足迹.push("口令敲了（支付宝验身份）");
+    const t0 = Date.now();
+    while (Date.now() - t0 < 25000) {
+      if (/cashierPreConfirm/.test(page.url()) || /确认付款/.test(await 文())) { 足迹.push("支付宝登回去了"); return true; }
+      if (/密码(错误|不正确|有误)/.test(await 文())) { 足迹.push("支付宝说口令不对——收手，不敲第二遍"); return false; }
+      await 睡(800);
+    }
+    足迹.push("口令敲完没等到收银台"); return false;
+  };
   const 收银台 = async () => {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       // ⚠️页面正在两页之间跳转时读到的是「加载中…」，我上一版据此就 return 了，
       //   于是第二页那颗「确认付款」永远没人按。等文本落定再判。
       try {
         await page.waitForFunction(
-          () => /确认付款|确认支付|支付成功|支付密码/.test((document.body && document.body.innerText) || ""),
+          () => /确认付款|确认支付|支付成功|支付密码|找人代付/.test((document.body && document.body.innerText) || ""),
           null, { timeout: 15000 });
       } catch {}
       const t = await 文();
+      // 11/19：支付宝没登着（挑付款方式那张页）→ 自己登回去，登成了接着走老路；登不回去＝留底、照实说、订单挂着她手机上能付
+      if (/h5pay\/unifiedLogin/.test(page.url()) || (/找人代付/.test(t) && !/确认付款/.test(t))) {
+        if (A.看收银台) return;                         // 排障：只看不动
+        const 成 = !支付宝登过 && (await 支付宝登回());
+        支付宝登过 = true;
+        if (!成) {
+          const 根 = await 留底("支付宝没登回去");
+          死("付款", "支付宝在我这头掉了登录，我自己没登回去（" + String(足迹[足迹.length - 1] || "").slice(0, 50) + "）——订单挂着待支付，十五分钟内你在手机闪购里点「去支付」就行", { 待支付: true, 留底: 根 });
+        }
+        continue;
+      }
       if (/支付成功|请输入支付密码|支付密码/.test(t)) return;
       if (/确认付款/.test(t)) {
         // ⭐8/17 起先挑余额宝再按钮（默认那张卡回回余额不足：8/13、8/17 两次实锤，白撞一遍还得
@@ -616,6 +985,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         if (i === 0 && /支付宝/.test(t)) { await 点字("支付宝", "支付宝"); await 慢(1200, 2400); }
         await 点字("确认支付", "确认支付"); await 慢(2500, 4200); continue;
       }
+      if (A.看收银台 && i >= 1) return;   // 11/19 排障：认不出的新样子别空转五圈，早点出来留底
       await 慢(1500, 2600);          // 认不出就再等一拍，别急着撒手
     }
   };
@@ -646,6 +1016,10 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       } catch (e) {
         if (敲 === 3) throw e;
         console.error(`首页第${敲}敲没开门（${String(e).slice(0, 60)}）——歇口气再敲`);
+        if (页没了(e)) {     // 11/10：页没了就别敲死页，重开一张再敲
+          try { await 换新页(敲); console.error("刚开的那张页没了，重开了一张"); }
+          catch (e2) { console.error("重开页没成：" + String(e2).slice(0, 60)); }
+        }
         await 慢(4000, 8000);
       }
     }
@@ -702,12 +1076,15 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         return true;
       };
       await 填();
-      if (/余额不足|更换其他付款方式/.test(await 文())) {     // 默认那张卡余额不足那道墙（8/13 实测）
-        await 点字("余额宝", "余额宝"); await 慢(2000, 3200);
-        await 点字("确认付款", "确认付款"); await 慢(2500, 4000);
+      for (let i = 0; i < 14 && !/支付成功|余额不足|更换其他付款方式|存在风险|中断了此次操作/.test(await 文()); i++) await 睡(1000);   // 11/10：墙是口令敲完几秒后才立起来的
+      if (支付宝掐(await 文())) await 过掐({});      // 11/21
+      if (/余额不足|更换其他付款方式/.test(await 文())) {     // 默认方式余额不足那道墙（8/13 实测）→ 余额宝／后手（11/10 她的法）
+        if (!(await 墙后换付法())) 死("付款", "付款没过：默认的方式余额不足，余额宝和后手那张也都不在能付的方式里——订单还挂着，你在手机闪购里点「去支付」就行", { 页面: (await 文()).slice(0, 300), 足迹 });
         await 填();
+        for (let i = 0; i < 14 && !/支付成功|余额不足|更换其他付款方式|存在风险|中断了此次操作/.test(await 文()); i++) await 睡(1000);
       }
-      for (let i = 0; i < 12 && !/支付成功/.test(await 文()); i++) await 睡(1800);
+      for (let i = 0; i < 12 && !/支付成功|存在风险|中断了此次操作/.test(await 文()); i++) await 睡(1800);
+      if (支付宝掐(await 文())) await 过掐({});      // 11/21
       const 详 = await 文();
       if (!/支付成功/.test(详)) 死("付款", "没等到「支付成功」", { 页面: 详.slice(0, 220), 足迹 });
       try { await 点字("完成", "完成"); } catch {}
@@ -1018,6 +1395,8 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     //   「去结算」→ h5.ele.me/newretail/tr/buy（同页跳）：地址若写「请选择收货地址…请确认」先点「使用」；明细「x1」是小写 x；合计三行「合计/已优惠 ¥5/¥26.8」；
     //   「提交订单」在底栏（没有 .submit-btn__button）；付款默认支付宝→照旧收银台那套。⚠️「提交订单」之后那段 10/18 没真走过。
     let 生鲜 = false, 生鲜车前 = NaN, 生鲜没进车 = "";
+    const 生鲜沾边 = [];   // 11/5：货架上没对上她要的，把沾边的货名攒着，三家都没有时带回去给她/上游点名
+    const 真品类词 = /^(水果|果切|鲜果|零食|小零食|饮料|蔬菜|鲜花)$/;   // 只有这种词才许「挑这家卖得多的」
     const 齐价 = (s) => (s || "").replace(/(\d)\n\.(\d)/g, "$1.$2");   // 「¥ / 25 / .8」三片拼回 25.8
     const 生鲜底栏 = async () => {
       let o = null;
@@ -1041,7 +1420,12 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       const 差 = Number((t.match(/(?:还差|差)\s*¥?\s*(\d+(?:\.\d+)?)\s*(?:元)?[^¥]{0,8}?起送/) || [])[1] || 0);
       return { 额: isFinite(额) ? 额 : NaN, 起送, 差, 文: t, 栏: o };
     };
-    const 生鲜读架 = () => page.evaluate(() => {
+    // ⭐11/5 梅子酒案：那家进口超市的货架读回来有一样叫「天天特价」——卡上头一行是促销签不是货名；
+    //   这家卡上的「+」也不挂 addWrap 这个类（三样都报「没找着那张卡的「+」」）。货名跳过促销签那行；「+」认不出 addWrap 就到步进器里找。
+    const 促销签 = "^(天天特价|特价|限时特价|限时秒杀|限时抢|秒杀|新品|上新|热卖|热销|爆款|爆品|推荐|店长推荐|人气|人气爆款|超值|折扣|自营|进口|新客专享|店铺新客|会员价|补贴|百亿补贴|预售|赠品|买赠|临期|临期特惠|\\d+(\\.\\d+)?折|.{0,4}立减.{0,6}|满.{1,6}减.{1,6}|第二件.{0,6})$";
+    const 生鲜读架 = () => page.evaluate((促销签) => {
+      const 签 = new RegExp(促销签);
+      const 名行 = (行) => (行.find((t) => !签.test(t) && !/^[¥￥]/.test(t)) || 行[0] || "").slice(0, 40);
       document.querySelectorAll("[data-g]").forEach((e) => e.removeAttribute("data-g"));
       let 卡们 = [...document.querySelectorAll("[class*='listItem'],[class*='cardWrapper'],[class*='goodsItem'],[class*='itemWrap']")]
         .filter((e) => e.querySelector("[class*='addWrap'],[class*='stepper']") && (e.innerText || "").replace(/\s/g, "").length > 6
@@ -1057,22 +1441,31 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const 售 = Number(((card.innerText || "").match(/已售\s*(\d+)/) || [])[1] || 0);
         const 数 = [...card.querySelectorAll("[class*='stepper'] *")].filter((x) => !x.children.length && /^\d+$/.test((x.innerText || "").trim()))[0];
         card.setAttribute("data-g", String(i));
-        out.push({ name: (行[0] || "").slice(0, 40), 价, 售, 规格: false, 售罄: /售罄|已售完|补货中|已下架/.test(card.innerText || ""), 能加: !!b,
+        out.push({ name: 名行(行), 价, 售, 规格: false, 售罄: /售罄|已售完|补货中|已下架/.test(card.innerText || ""), 能加: !!b,
                    买过: false, 加料: false, 生鲜: true, 在车: 数 ? Number(数.innerText.trim()) : 0 });
       });
       return out.filter((m) => m.name && isFinite(m.价) && m.价 > 0 && m.能加 && !m.售罄 && !/盲盒|盲选|盲喝|随机|神秘|隐藏款|礼盒|果篮|会员/.test(m.name));
-    });
-    const 生鲜标卡 = (name) => page.evaluate((name) => {   // 给货架上名字正好是它的那张卡打标记；回卡上步进器的数（没长步进器＝0）
+    }, 促销签);
+    const 生鲜标卡 = (name) => page.evaluate(({ name, 促销签 }) => {   // 给货架上名字正好是它的那张卡打标记；回卡上步进器的数（没长步进器＝0）
+      const 签 = new RegExp(促销签);
+      const 名行 = (行) => (行.find((t) => !签.test(t) && !/^[¥￥]/.test(t)) || 行[0] || "").slice(0, 40);
       document.querySelectorAll("[data-plus],[data-gcard]").forEach((e) => { e.removeAttribute("data-plus"); e.removeAttribute("data-gcard"); });
       let 卡们 = [...document.querySelectorAll("[class*='listItem'],[class*='cardWrapper'],[class*='goodsItem'],[class*='itemWrap']")]
-        .filter((e) => e.querySelector("[class*='addWrap'],[class*='stepper']") && ((e.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean)[0] || "").slice(0, 40) === name);
+        .filter((e) => e.querySelector("[class*='addWrap'],[class*='stepper']") && 名行((e.innerText || "").split("\n").map((s) => s.trim()).filter(Boolean)) === name);
       卡们 = 卡们.filter((e) => !卡们.some((o) => o !== e && e.contains(o)));
       const 卡 = 卡们[0]; if (!卡) return null;
       卡.setAttribute("data-gcard", "1"); 卡.scrollIntoView({ block: "center" });
-      const b = 卡.querySelector("[class*='addWrap']"); if (b) b.setAttribute("data-plus", "1");
+      // 「+」：先认 addWrap（百果园）；没有就到步进器里找带 add/plus/increase 的那颗；再没有——步进器本身就一颗钮大小（收着的步进器＝只有「+」）就认它，否则认它最后一个孩子
+      let b = 卡.querySelector("[class*='addWrap']");
+      let 路 = b ? "addWrap" : "";
+      if (!b) { b = 卡.querySelector("[class*='stepper'] [class*='add' i],[class*='stepper'] [class*='plus' i],[class*='stepper'] [class*='increase' i]"); if (b) 路 = "步进器里的加号"; }
+      if (!b) { const st = 卡.querySelector("[class*='stepper']");
+        if (st) { const r = st.getBoundingClientRect(); b = (r.width <= 64 || !st.lastElementChild) ? st : st.lastElementChild; 路 = r.width <= 64 ? "收着的步进器" : "步进器最后一个孩子"; } }
+      if (b) b.setAttribute("data-plus", "1");
       const 数 = [...卡.querySelectorAll("[class*='stepper'] *")].filter((x) => !x.children.length && /^\d+$/.test((x.innerText || "").trim()))[0];
-      return { 钮: !!b, 数: 数 ? Number(数.innerText.trim()) : 0 };
-    }, name);
+      const 类 = [...new Set([...卡.querySelectorAll("[class*='add' i],[class*='stepper' i],[class*='plus' i],[class*='cart' i]")].map((x) => (x.className || "").toString().slice(0, 40)))].slice(0, 8);
+      return { 钮: !!b, 路, 数: 数 ? Number(数.innerText.trim()) : 0, 类 };
+    }, { name, 促销签 });
     const 点准字 = async (词, 名, 底 = 0) => {   // 只认整个叶子正好是这几个字的（「清空」别咬到「确定清空购物车？」）
       const 有 = await page.evaluate(({ 词, 底 }) => {
         document.querySelectorAll("[data-tap2]").forEach((e) => e.removeAttribute("data-tap2"));
@@ -1093,12 +1486,21 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       let 前 = 0;
       for (let k = 0; k < 份; k++) {
         const 卡 = await 生鲜标卡(m.name);
-        if (!卡 || !卡.钮) { 足迹.push(`货架上没找着「${m.name}」那张卡的「+」`); return false; }
-        if (k === 0) 前 = 卡.数 || 0;
+        if (!卡) { 足迹.push(`货架上没找着「${m.name}」那张卡（名字对不上了）`); return false; }
+        if (!卡.钮) { 足迹.push(`货架上「${m.name}」那张卡没认出「+」（卡里带 add/stepper/cart 的类：${(卡.类 || []).join(" ｜ ") || "一个都没有"}）`); return false; }
+        if (k === 0) { 前 = 卡.数 || 0; if (卡.路 && 卡.路 !== "addWrap") 足迹.push(`「${m.name}」的「+」不挂 addWrap，认的是「${卡.路}」`); }
         await 慢(900, 1700);
+        const 店堂前 = page.url();
         if (!(await 鼠标点("[data-plus='1']", `「${m.name}」的「+」`))) return false;
         await 慢(2600, 4000);     // 步进器/底栏慢两三秒
         await 查验证("生鲜加购");
+        if (!/newretail\/p\/ushop/.test(page.url())) {   // 11/5：点「+」点成了进商品页——退回店堂，这样东西算没加上
+          足迹.push(`点「${m.name}」的「+」落到了别的页（${page.url().replace(/^https?:\/\//, "").slice(0, 60)}），退回店堂`);
+          try { await page.goBack({ waitUntil: "domcontentloaded", timeout: 12000 }); } catch {}
+          await 慢(2000, 3200);
+          if (!/newretail\/p\/ushop/.test(page.url())) { try { await page.goto(店堂前, { waitUntil: "domcontentloaded" }); await 慢(2500, 4000); } catch {} }
+          return false;
+        }
         // 有的货按「+」会弹份量/规格面板（10/18 百果园没撞见）——弹了就按面板里的「加入购物车」/「确定」
         if (await page.evaluate(() => [...document.querySelectorAll("*")].some((x) => !x.children.length && /^(加入购物车|确定|确认)$/.test((x.innerText || "").trim()) && x.getBoundingClientRect().y > innerHeight * 0.5))) {
           足迹.push(`「${m.name}」按「+」弹了面板，按面板里的钮`);
@@ -1443,12 +1845,22 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       const 有奶 = (s) => /奶|牛乳|鲜乳|拿铁/.test(s || "");
       const 奶合 = (m) => !!m.name && 有奶(m.name) === 有奶(DISH);
       list = list.filter(奶合);
+      // ⭐11/5 梅子酒案：她要的是酒——带「酒」字的零嘴（酒鬼豆筋/酒心巧克力/梅酒味软糖）不算候选
+      if (酒样.test(DISH)) list = list.filter((m) => 是酒货(m.name));
       const 硬 = list.find((m) => m.name === DISH);
       if (硬) return 硬;
       let c = list.filter((m) => m.name && m.name.includes(DISH));
       if (!c.length && DISH.length > 3) {
         const 核 = DISH.replace(/^(六窨|古法|招牌|经典)/, "");
         c = list.filter((m) => m.name && m.name.includes(核));
+      }
+      let 瘦中 = "";
+      if (!c.length && DISH.length >= 2 && 喝的词(DISH)) {
+        // ⭐11/5 梅子酒案：嘴上夹着「子/儿」，货名常省——梅子酒↔梅酒、桃子汁↔桃汁、椰子汁↔椰汁。两边都把夹在中间的口头字剥掉再对一遍
+        //   （她说梅酒、货叫梅子酒也认）。只对喝的开这一档：「辣子鸡」剥成「辣鸡」会咬到「香辣鸡腿堡」。
+        const 瘦 = (t) => (t || "").replace(/(?<=[\u4e00-\u9fff])[子儿](?=[\u4e00-\u9fff])/g, "");
+        const d = 瘦(DISH);
+        if (d.length >= 2) { c = list.filter((m) => m.name && 瘦(m.name).includes(d)); if (c.length) 瘦中 = d; }
       }
       if (!c.length && DISH.length >= 4) {
         // ⚠️8/15 宫保/宫爆案：一字之差不该空手——同长且只差一个字就认（店家错别字比她的嘴多）
@@ -1483,7 +1895,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         if (c.length && globalThis.__足迹) globalThis.__足迹.push(`「${DISH}」没有整名对上的，按词袋认了「${c[0].name}」（近亲）`);
       }
       // （8/14 的「无奶优先」已被上面的奶性一致律盖住：那条只在有别的选择时才排奶，8/30 就是这么漏的）
-      return c.sort((a, b) => 忌(a.name) - 忌(b.name) || 素(a.name) - 素(b.name) || 头(a.name) - 头(b.name) || 裸长(a.name) - 裸长(b.name) || a.name.length - b.name.length)[0] || null;
+      // ⭐11/5：超市货架上同一路货常有好几瓶（梅见 330ml ¥26.9／芳歌 750ml ¥59／俏雅 820ml ¥96）——先在她的线里挑，线里一瓶都没有才看线外的
+      if (c.length > 1 && c.some((m) => m.生鲜)) { const 线内 = c.filter((m) => !(m.价 > MAX)); if (线内.length) c = 线内; }
+      const 中 = c.sort((a, b) => 忌(a.name) - 忌(b.name) || 素(a.name) - 素(b.name) || 头(a.name) - 头(b.name) || 裸长(a.name) - 裸长(b.name) || a.name.length - b.name.length)[0] || null;
+      if (中 && 瘦中 && globalThis.__足迹 && !挑名核._瘦说过) { 挑名核._瘦说过 = true; globalThis.__足迹.push(`「${DISH}」没有整名对上的，剥掉嘴上的口头字按「${瘦中}」对上了「${中._rawName || 中.name}」`); }
+      return 中;
     };
     const 挑名 = (list) => {
       if (!DISH) return null;
@@ -1653,6 +2069,19 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         生鲜 = true;
         生鲜车前 = (await 生鲜底栏()).额;
         菜 = await 生鲜读架(); 规格菜 = [];
+        // ⭐11/5 梅子酒案（当晚我亲手进这家店看到的）：带着搜索词进门，店堂先渲染一版默认货架（热卖/天天特价），过几秒才把「刚刚搜过」那一栏
+        //   插进来顶在最前头、整列换掉——20:31 那趟读到的 23 样是换之前那一版（里头没有梅见），等去按「+」时那几张卡早不在了，
+        //   所以三样全报「没找着那张卡」。法：货架要读到落定——隔两三秒再读一遍，头几样没变才算数（最多等三拍）。
+        for (let 等 = 0; 等 < 3; 等++) {
+          await 慢(1800, 2800);
+          const 再 = await 生鲜读架();
+          const 头 = (l) => l.slice(0, 5).map((m) => m.name).join("｜");
+          const 定 = 再.length === 菜.length && 头(再) === 头(菜);
+          菜 = 再;
+          if (定) break;
+          足迹.push(`货架还在换（现在头一样是「${((菜[0] || {}).name || "").slice(0, 16)}」），再等一拍`);
+        }
+        if (/刚刚搜过/.test(await 文())) 足迹.push("货架上有「刚刚搜过」那一栏（平台按她的词对出来的货顶在最前头）");
         for (let 拱 = 0; 拱 < 2 && 菜.length < 12; 拱++) {   // 货架懒加载：拿最后一张卡拱一屏再读，并进来
           await page.evaluate(() => { const c = document.querySelectorAll("[data-g]"); const e = c[c.length - 1]; if (e) e.scrollIntoView({ block: "end" }); });
           await 慢(1500, 2500);
@@ -1663,11 +2092,18 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         足迹.push(`「${店.name}」是生鲜店堂，货架读到 ${菜.length} 样（进门时底栏 ¥${生鲜车前}）：${菜.slice(0, 8).map((m) => m.name.slice(0, 16)).join("、")}`);
         if (!本来点了名 && 短词) { DISH = 短词; 足迹.push(`「${短词}」先当货名到「${店.name}」货架上对一遍`); }
         if (DISH && !挑名(菜)) {
-          if (!本来点了名) {
-            if (!菜.some(兜底筛)) { 足迹.push(`第${位}家「${店.name}」货架上没对上「${DISH}」，也没一样像她要的（忌口筛过），换下一家`); await 回搜索(); continue; }
-            足迹.push(`第${位}家「${店.name}」货架上没对上「${DISH}」——当品类词，挑这家卖得多的`);
+          // ⭐11/5 梅子酒案：超市货架上对不上她要的，别拿「这家卖得多的」充数——卖得多的是冰杯、豆筋、矿泉水，跟她要的八竿子打不着。
+          //   只有「水果／零食」这种真品类词才兜底；别的词点没点名都一样：记下沾边的货名，换下一家。
+          if (!本来点了名 && 真品类词.test(DISH) && 菜.some(兜底筛)) {
+            足迹.push(`第${位}家「${店.name}」货架上没对上「${DISH}」——是品类词，挑这家卖得多的`);
             DISH = "";
-          } else { 足迹.push(`第${位}家「${店.name}」货架上没见着「${DISH}」，换下一家`); await 回搜索(); continue; }
+          } else {
+            const 实字 = [...new Set(DISH.replace(/[子儿的]/g, "") || DISH)];
+            const 沾 = 菜.filter((m) => 实字.filter((ch) => m.name.includes(ch)).length >= Math.min(2, 实字.length)).slice(0, 6).map((m) => `${m.name} ¥${m.价}`);
+            沾.forEach((t) => 生鲜沾边.push(`${(店.name || "").slice(0, 14)}：${t}`));
+            足迹.push(`第${位}家「${店.name}」货架上没对上「${DISH}」${沾.length ? "（沾边的：" + 沾.join("、") + "）" : ""}，换下一家`);
+            await 回搜索(); continue;
+          }
         } else if (DISH) 足迹.push(`第${位}家「${店.name}」货架上对上了「${(挑名(菜) || {}).name}」`);
         定了 = true;
         break;
@@ -1763,12 +2199,14 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       定了 = true;
       break;
     }
+    if (!定了 && DISH && 生鲜沾边.length) 死("挑菜", `连着看了几家，货架上都没对上「${DISH}」。沾边的有：${生鲜沾边.slice(0, 6).join("；")}——点名要哪一样我再去`, { 足迹, 沾边的: 生鲜沾边.slice(0, 12) });
     if (!定了) 死("挑菜", DISH ? `连着看了几家都没见着「${DISH}」——要不换个说法，要不我随便挑` : (新零售店 >= 2 ? "连着进了几家生鲜店堂，货架上没一样像她要的" : "一家能进的店都没有"), { 足迹 });
 
     // ⭐8/14 十二诊（她要大杯，我端上来中杯大杯各一）：8/13 六诊说「除非真缺选，一个规格都别动」
     //   ——那条拦的是「乱点」，不是「她点了名的」。她说大杯就得挑大杯：只点她点名的那几个词，
     //   别的一概不碰。⚠️第二杯也得挑一遍（sku 面板每次拉出来都是默认档，不记上一次）。
     const 挑规格 = async () => {
+      const 缺 = [];   // 11/19：面板里找着了、却没点上的规格（外面拿它决定下不下单）
       for (const g of (A.规格 || [])) {
         // ⭐8/23：默认档已经是她要的（「已选：超大杯/冰/…」）就别碰——多点一下只会点歪
         const 已 = ((await 文()).match(/已选[：:]\s*([^\n]{2,80})/) || [])[1] || "";
@@ -1785,14 +2223,33 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
           if (!e) return false;
           const 盒 = e.closest("[class*='prop' i],[class*='sku' i],[class*='option' i],[class*='spec' i]");
           if (严 && !盒) return false;
-          (盒 || e).setAttribute("data-opt", "1");
+          // ⭐11/19（茉莉绿茶案：她要的那杯我说「喝热的」，端上来的是标准冰）：从前把记号打在「盒」上——最近的那个名字带 prop/sku 的祖先，
+          //   在一点点的面板里那是【整组选项】的大盒子，真鼠标点它的中心＝点在别的选项上或者面板外头（那晚点在 @89,844，下单钮都在 786）。
+          //   现在只认贴身的那一颗：从这个字往上找，找到「里头只有这一个选项的字」的最外一层为止；再把它拉到眼前（面板里的选项常常滚在底栏下面）。
+          const 自 = (e.innerText || "").trim();
+          let t = e;
+          while (t.parentElement && (t.parentElement.innerText || "").trim() === 自 && t.parentElement.getBoundingClientRect().height < 90) t = t.parentElement;
+          t.setAttribute("data-opt", "1");
+          e.setAttribute("data-opt-leaf", "1");
+          t.scrollIntoView({ block: "center" });
           return true;
         }, { g, 严 });
-        if (有) { await 鼠标点("[data-opt='1']", `规格「${g}」`); await 慢(900, 2000); }
-        else 足迹.push(`规格「${g}」没找着`);
+        if (!有) { 足迹.push(`规格「${g}」没找着`); continue; }
+        await 睡(450);
+        await 鼠标点("[data-opt='1']", `规格「${g}」`); await 慢(900, 2000);
+        // 点完对账：面板上写着「已选：…」就看里头有没有它；没有＝没点上，再点一回字本身；还没有＝报缺（外面不下单）
+        const 选上了 = async () => { const y = ((await 文()).match(/已选[：:]\s*([^\n]{2,80})/) || [])[1] || ""; return !y || y.split(/[\/／、,，\s]+/).includes(g); };
+        if (!(await 选上了())) {
+          await page.evaluate(() => { const l = document.querySelector("[data-opt-leaf='1']"); if (l) l.scrollIntoView({ block: "center" }); }).catch(() => {});
+          await 睡(450);
+          await 鼠标点("[data-opt-leaf='1']", `规格「${g}」（再点一回字本身）`); await 慢(900, 1800);
+          if (!(await 选上了())) { 缺.push(g); 足迹.push(`规格「${g}」点了两回都没选上`); }
+        }
+        await page.evaluate(() => document.querySelectorAll("[data-opt-leaf]").forEach((x) => x.removeAttribute("data-opt-leaf"))).catch(() => {});
       }
       if ((A.规格 || []).length)
         足迹.push("挑完规格：" + (((await 文()).match(/已选[：:]\s*([^\n]{2,80})/) || [])[1] || "页面没写「已选」"));
+      return 缺;
     };
 
     const 加规格菜 = async (m, 份 = 1) => {
@@ -1930,7 +2387,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
           足迹.push(`再试 →${开了 ? "开了" : "还是没开"}`);
         }
         if (!开了) {
-          // ⭐8/16 螺蛳粉八里庄案：卡身、卡图都不应手——这家的卡上有颗「选规格」小钮，那才是正门门铃；
+          // ⭐8/16 螺蛳粉案：卡身、卡图都不应手——这家的卡上有颗「选规格」小钮，那才是正门门铃；
           //   没有「选规格」就摸卡上的加号。第三重后手，再不开才认输。
           const 钮 = await page.evaluate(() => {
             const el = document.querySelector('[data-spec="1"]');
@@ -2021,7 +2478,13 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         足迹.push("sku面板：" + JSON.stringify(面板).slice(0, 420));
       } catch {}
 
-      await 挑规格();
+      const 规格缺 = (await 挑规格()) || [];
+      if (规格缺.length) {   // 11/19：她点名的规格没点上＝不按下单钮（按了就是照默认档给她下单：要热的来了冰的）
+        globalThis.__规格缺 = 规格缺;
+        足迹.push(`规格「${规格缺.join("、")}」没点上——这一样不加进车`);
+        if (/ele-product-detail|ele-index-search/.test(page.url())) { try { await page.goBack({ waitUntil: "domcontentloaded", timeout: 12000 }); } catch {} await 慢(1500, 2800); }
+        return false;
+      }
 
       // 第二段：面板里的真下单钮
       await 鼠标点(".sku__button", "sku 面板的下单钮");
@@ -2097,7 +2560,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const 忌口 = /奶|乳|麻薯|珍珠|芋圆|小圆子|西米|年糕|汤圆|粽|糯|辣条|麻辣/;
         if (店.起送 > 0 && 主价 > 0 && 主价 < 店.起送) {
           const 差 = 店.起送 - 主价;
-          const 配 = [...菜].filter((m) => m !== hit && m.价 > 0 && !忌口.test(m.name || ""))
+          const 配 = [...菜].filter((m) => m !== hit && m.价 > 0 && !忌口.test(m.name || "") && !凑头避(m.name))   // 11/5：凑头不拿冰、不拿酒
             .sort((a, b) => {
               const sa = /小菜|青菜|生菜|油麦|腐竹|木耳|花生|蛋|豆|鸭|饮|可乐|王老吉|酸奶|凉菜/.test(a.name) ? 0 : 1;
               const sb = /小菜|青菜|生菜|油麦|腐竹|木耳|花生|蛋|豆|鸭|饮|可乐|王老吉|酸奶|凉菜/.test(b.name) ? 0 : 1;
@@ -2300,8 +2763,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       // ⭐8/15 她的眼睛平反了套餐案（「咪看这个套餐不需要选规格，直接点一下就进购物车了」）：
       //   「未选必选品」多半是**店规**——店里有「必选商品」栏（餐盒/打包盒那类一两块的小件），
       //   车里不带它结算钮就不亮。先补小件；实在补不上再走清车+详情页的老路。
-      if (选.length && /未选必选品/.test(await 文())) {
-        // ⭐8/15 晚·手验过的捷径（晨曦炖汤案）：按一下「未选必选品」那颗钮，菜单自己跳到必选栏
+      // ⭐11/11 松茸鸡汤案（一家炖汤店·她说随便、不想吃粥）：这一段从前只在「直接按加号的菜」后头跑（选.length），
+      //   规格菜（走详情页那条路）加完没人管必选品——底栏写着「未选必选品」不认得，报成「东西没真进购物车」。
+      //   现在抽成一只手：直接加的菜后头跑一回（补不上走清车老路），规格菜加完再看一回（补不上不清车，交给后面的闸）。
+      const 补必选 = async (老路) => {
+        // ⭐8/15 晚·手验过的捷径（炖汤店案）：按一下「未选必选品」那颗钮，菜单自己跳到必选栏
         //   （「餐具自选」），¥0 的「需要餐具」就在眼前——比满菜单扫快十倍，先走这条。
         足迹.push("撞上「未选必选品」——按钮跳必选栏补小件");
         const 必选钮 = await page.evaluate(() => {
@@ -2353,16 +2819,28 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
           小件 = 认小件([...见.values()]);
         }
         if (小件) { if (await 加小件(小件)) 小件加了++; await 慢(1500, 2500); }
-        if (/未选必选品/.test(await 文())) {
+        if (老路 && /未选必选品/.test(await 文())) {
           足迹.push("必选小件没补上——清车重来，改走详情页（老路）");
           await 清车();
           await 慢(1500, 2500);
           for (const m of 选) await 加规格菜(m, 份);
         }
-      }
+      };
+      if (选.length && /未选必选品/.test(await 文())) await 补必选(true);
       for (const [idx, m] of 规格选.entries()) {
         const 成 = await 加规格菜(m, 份);
         if (!成 && DISH && idx === 0) 主菜没加上 = m.name;   // 8/23 那家店：「柚C 美式」没开详情页，旧法照样去结算，差点替她付了杯没点的特惠套餐
+      }
+      if (规格选.length && !主菜没加上) {
+        // 11/11：规格菜退回店堂后，底栏慢半拍才换字（退回那一眼读到的还是 ¥0）——等它落定再看有没有「未选必选品」
+        let 必 = false;
+        for (let k = 0; k < 5; k++) {
+          const t = await 文();
+          if (/未选必选品/.test(t)) { 必 = true; break; }
+          if (/去结算|选好了|去下单|立即下单|差\s*¥?\s*[\d.]+\s*(?:元)?\s*(?:起送|配送)/.test(t.slice(-600))) break;
+          await 睡(1600);
+        }
+        if (必) await 补必选(false);
       }
     }
     await 慢();
@@ -2469,8 +2947,12 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       return 净;
     };
     if (生鲜没进车) { await 撤货(); 死("加购", `生鲜店堂：「${生鲜没进车}」按了「+」没进车（步进器/底栏没动），我加的已撤回，没去结算`, { 足迹 }); }
-    if (主菜没加上) { await 撤货(); 死("加购", `她点名的「${主菜没加上}」没加进车（详情页打不开），别的我也撤了，没去结算`); }
+    if (主菜没加上) { await 撤货(); 死("加购", (globalThis.__规格缺 && globalThis.__规格缺.length)
+      ? `「${主菜没加上}」的规格「${globalThis.__规格缺.join("、")}」我没点上，没敢照默认的给你下单（一分没花）——再说一遍我重点，或者你手机上点`
+      : `她点名的「${主菜没加上}」没加进车（详情页打不开），别的我也撤了，没去结算`); }
     let 车 = await 文();
+    // 11/11：底栏慢半拍才换字——没见着结算钮、也没见「差¥X起送」「未选必选品」时再等几拍，别急着判「没进车」
+    for (let k = 0; k < 4 && !结按钮.test(车) && !/未选必选品/.test(车) && !/(?:还差|差)\s*¥?\s*[\d.]+\s*(?:元)?\s*(?:起送|配送|可配送)/.test(车.slice(-500)); k++) { await 睡(1700); 车 = await 文(); }
     // ⭐8/23 冰美式案：瑞幸的起送线按到手价算（标价¥13的美式到手¥9.9，起送¥20），东西明明进了车，
     //   底栏那颗钮写的是「差¥10.1起送」而不是「选好了」——旧法一看没有结算字样就报「没进车」，冤。
     //   法：底栏说「差¥X起送」＝车里有货、差起送线 → 从菜单里挑一样便宜的凑上去（一样够就挑最便宜的够数那样；
@@ -2505,7 +2987,7 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
         const b = await 生鲜底栏();
         const 差 = b.差 > 0 ? b.差 : ((b.起送 > 0 && b.额 >= 0 && b.额 < b.起送) ? b.起送 - b.额 : 0);
         if (!(差 > 0)) break;
-        const 候 = 菜.filter((m) => m.name && m.价 > 0 && !已加.has(m.name) && 兜底筛(m) && 花 + m.价 <= MAX * 1.9);
+        const 候 = 菜.filter((m) => m.name && m.价 > 0 && !已加.has(m.name) && 兜底筛(m) && !凑头避(m.name) && 花 + m.价 <= MAX * 1.9);   // 11/5：凑头不拿冰、不拿酒
         const m = 候.filter((x) => x.价 >= 差 && 花 + x.价 <= MAX - 3).sort((a, c) => a.价 - c.价)[0]
                || 候.filter((x) => x.价 >= 差).sort((a, c) => a.价 - c.价)[0]
                || 候.sort((a, c) => c.价 - a.价)[0];
@@ -2550,6 +3032,30 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     } catch {}
     await 慢(1500, 3000);
     let 结文 = 齐价(await 文());   // 10/18：生鲜结算页把 26.8 拆成「¥ / 26 / .8」三行，先拼回去
+    // 11/15：切果NOW! 草莓芒果果切那单——货进了车、按了「去结算」，结算页二十多秒一个字没出来，读回来是空的，
+    //   被下面「车件<该有」当成「0 样」拦下、车也清了，报给她的是「没全进车」（其实是结算页没开出来）。
+    //   白着就多等几拍（每拍把网址和字数记进足迹、顺手查验证）；第三拍还白就刷新一回；一直白＝照实报「结算页没开出来」。
+    const 结算页有字 = (t) => /合计|实付|支付|提交订单/.test(t || "");
+    for (let 拍 = 0; 拍 < 4 && !结算页有字(结文); 拍++) {
+      let 址 = ""; try { 址 = page.url(); } catch {}
+      足迹.push(`结算页还没出字（第${拍 + 1}拍·读到 ${结文.length} 字·${址.slice(0, 90)}），再等`);
+      await 查验证("结算页");
+      if (拍 === 2) {
+        try { await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 }); 足迹.push("结算页刷新了一回"); }
+        catch (e) { 足迹.push("结算页刷新没成：" + String((e && e.message) || e).slice(0, 60)); }
+      }
+      try {
+        await page.waitForFunction(
+          () => { const t = (document.body && document.body.innerText) || ""; return t.length > 40 && /合计|实付|支付|提交订单/.test(t); },
+          null, { timeout: 15000 });
+      } catch {}
+      await 慢(1500, 2500);
+      结文 = 齐价(await 文());
+    }
+    if (!结算页有字(结文)) {
+      await 撤货();
+      死("结算", "按了去结算，结算页等了一分多钟还是白的、没开出来——我加的已撤回，钱没出去", { 足迹, 结算页: 结文.slice(0, 300) });
+    }
     if (/起送/.test(结文) && /还差/.test(结文)) {
       await 撤货();   // 8/18：凑不够起送就收摊，别把菜留在车里坑下一单
       死("结算", "没够起送价（我加的已撤回）", { 摘: 结文.slice(0, 120), 足迹 });
@@ -2635,6 +3141,11 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
     await 慢(3500, 5500);
     await 查验证("收银台");
     await 收银台();
+    if (A.看收银台) {   // 11/19 排障入口：走到付钱页就停——留底、不付钱、页留着（订单挂着待支付，十五分钟不付自己过期）
+      const 根 = await 留底("看收银台");
+      globalThis.__不收工 = true;
+      死("看收银台", "照吩咐停在付钱页：没付钱，页留着，订单挂着待支付（十五分钟不付自己过期）", { ...单子, 待支付: true, 留底: 根, url: page.url() });
+    }
 
     const pwd = 口令();
     const 填密码 = async () => {
@@ -2646,27 +3157,31 @@ const 写账 = (d) => { try { fs.writeFileSync(账本, JSON.stringify(d), "utf8"
       return true;
     };
     await 填密码();
+    // ⭐11/10（11/7 晚三鲜水饺、11/10 小馄饨两回「付款没过」）：口令敲完，页面要过几秒才出结果——成了＝「支付成功」；
+    //   没成＝「银行卡可用余额不足，请更换其他付款方式」并把方式列表摊开。旧法敲完口令歇三四秒就去看有没有撞墙，这两回墙都是
+    //   之后才立起来的＝没认出来，干等十八秒报「没等到支付成功」，家里只说了句「付款没过」，她不知道订单还挂着能付。
+    //   现在等到两样里出一样再往下走（最多 14 秒）。
+    for (let i = 0; i < 14 && !/支付成功|余额不足|更换其他付款方式|存在风险|中断了此次操作/.test(await 文()); i++) await 睡(1000);
 
     // 默认那张卡余额不足那道墙（8/13、8/17 两次实测）：改走余额宝
     // ⭐8/17 手动实录：撞墙后页面**当场把方式列表摊开**（余额宝 可用¥3677 就在里头），
     // 点它→再「确认付款」→**还要再敲一遍口令**才算完；这里用真鼠标点字（getByText 在 Tiga 活件上时灵时不灵）。
+    if (支付宝掐(await 文())) await 过掐(单子);      // 11/21：口令敲完支付宝把这笔掐了
     if (/余额不足|更换其他付款方式/.test(await 文())) {
-      try {
-        足迹.push("默认那张卡余额不足 → 切余额宝重付");
-        if (!(await 点字("余额宝", "余额宝"))) {
-          await page.getByText("余额宝", { exact: false }).first().click({ timeout: 5000 });
-        }
-        await 慢(2000, 3200);
-        if (!(await 点字("确认付款", "确认付款（余额宝）"))) {
-          await page.getByText("确认付款", { exact: false }).first().click();
-        }
-        await 慢(2500, 4000);
-        await 填密码();
-      } catch (e) { 死("付款", "卡里余额不足，切余额宝也没成：" + e.message, 单子); }
+      // 11/10：余额宝能用走余额宝，不够就走后手那张（她的法·口令同一个）；两样都不在＝说清楚收手，别的卡和花呗不碰
+      const 走 = await 墙后换付法();
+      if (!走) {
+        足迹.push("默认的方式余额不足，余额宝和后手那张都不在能付的方式里——收手");
+        死("付款", "付款没过：默认的方式余额不足，余额宝和后手那张也都不在能付的方式里——订单挂着待支付，十五分钟内你在手机闪购里点「去支付」就行",
+           { ...单子, 待支付: true, 页面: (await 文()).slice(0, 300) });
+      }
+      await 填密码();
+      for (let i = 0; i < 14 && !/支付成功|余额不足|更换其他付款方式|存在风险|中断了此次操作/.test(await 文()); i++) await 睡(1000);
     }
 
-    for (let i = 0; i < 10 && !/支付成功/.test(await 文()); i++) await 睡(1800);
-    if (!/支付成功/.test(await 文())) 死("付款", "没等到「支付成功」", { ...单子, 页面: (await 文()).slice(0, 160) });
+    for (let i = 0; i < 10 && !/支付成功|存在风险|中断了此次操作/.test(await 文()); i++) await 睡(1800);
+    if (支付宝掐(await 文())) await 过掐(单子);      // 11/21：换过付法、再敲一遍之后才被掐的也认
+    if (!/支付成功/.test(await 文())) { const 根 = await 留底("付款没成"); 死("付款", "没等到「支付成功」", { ...单子, 待支付: true, 页面: (await 文()).slice(0, 160), 留底: 根 }); }
 
     try { await page.getByText("完成", { exact: true }).first().click({ timeout: 5000 }); } catch {}
     await 慢(4000, 6000);
